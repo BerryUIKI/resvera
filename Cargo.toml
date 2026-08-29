@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/resvera-core",
+    "crates/resvera-engine-ort",
     "crates/resvera-models",
     "crates/resvera-persistence",
 ]
