@@ -3,6 +3,7 @@ import { Header } from "./components/Header";
 import { ComparisonViewer } from "./components/ComparisonViewer";
 import { QueueList } from "./components/QueueList";
 import { SettingsModal } from "./components/SettingsModal";
+import { ModelCenterModal } from "./components/ModelCenterModal";
 import { getRuntimeStatus, listModels, loadSettings } from "./lib/api";
 import { AppSettings, JobSnapshot, ModelSummary, RuntimeStatus } from "./types/ipc";
 
@@ -16,6 +17,7 @@ export const App: Component = () => {
     defaultModelId: "realesrgan-x4plus",
     defaultModelVariantId: "default",
     defaultTargetScale: 4,
+    namingTemplate: "{stem}_{model}_{scale}x",
     metadataPolicy: "preserveSafe",
     preserveGps: false,
     providerPreference: { kind: "automatic" },
@@ -35,6 +37,7 @@ export const App: Component = () => {
   const [selectedJobId, setSelectedJobId] = createSignal<string | null>(null);
   const [isPaused, setIsPaused] = createSignal(false);
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
+  const [isModelCenterOpen, setIsModelCenterOpen] = createSignal(false);
 
   onMount(async () => {
     const [status, modelList, appSettings] = await Promise.all([
@@ -99,6 +102,7 @@ export const App: Component = () => {
       <Header
         status={runtimeStatus()}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenModelCenter={() => setIsModelCenterOpen(true)}
       />
 
       <div class="flex flex-1 overflow-hidden">
@@ -223,6 +227,12 @@ export const App: Component = () => {
         settings={settings()}
         onClose={() => setIsSettingsOpen(false)}
         onSave={setSettings}
+      />
+
+      <ModelCenterModal
+        isOpen={isModelCenterOpen()}
+        models={models()}
+        onClose={() => setIsModelCenterOpen(false)}
       />
     </div>
   );

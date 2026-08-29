@@ -44,6 +44,23 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
           </div>
 
           <div>
+            <label class="block font-medium mb-1 text-slate-400">Output Naming Template</label>
+            <input
+              type="text"
+              value={props.settings.namingTemplate}
+              onInput={(e) =>
+                props.onSave({
+                  ...props.settings,
+                  namingTemplate: e.currentTarget.value,
+                })
+              }
+              class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-slate-200 font-mono text-xs"
+              placeholder="{stem}_{model}_{scale}x"
+            />
+            <p class="text-[10px] text-slate-500 mt-1">Available variables: {'{stem}'}, {'{model}'}, {'{scale}'}, {'{timestamp}'}</p>
+          </div>
+
+          <div>
             <label class="block font-medium mb-1 text-slate-400">Metadata Policy</label>
             <select
               value={props.settings.metadataPolicy}
