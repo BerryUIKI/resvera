@@ -1,5 +1,6 @@
 import { Component } from "solid-js";
 import { AppSettings } from "../types/ipc";
+import { Locale, useI18n } from "../i18n";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -9,13 +10,14 @@ interface SettingsModalProps {
 }
 
 export const SettingsModal: Component<SettingsModalProps> = (props) => {
+  const { t, locale, setLocale } = useI18n();
   if (!props.isOpen) return null;
 
   return (
     <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div class="w-full max-w-md bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-2xl space-y-5 select-none">
         <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-          <h2 class="text-base font-semibold text-slate-100">Preferences & Offline Settings</h2>
+          <h2 class="text-base font-semibold text-slate-100">{t("settings.title")}</h2>
           <button
             onClick={props.onClose}
             class="text-slate-400 hover:text-slate-200"
@@ -26,7 +28,26 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
 
         <div class="space-y-4 text-xs text-slate-300">
           <div>
-            <label class="block font-medium mb-1 text-slate-400">Theme</label>
+            <label class="block font-medium mb-1 text-slate-400">{t("settings.language")}</label>
+            <select
+              value={locale()}
+              onChange={(e) => {
+                const newLoc = e.currentTarget.value as Locale;
+                setLocale(newLoc);
+                props.onSave({
+                  ...props.settings,
+                  locale: newLoc,
+                });
+              }}
+              class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-slate-200"
+            >
+              <option value="zh-CN">简体中文 (Simplified Chinese)</option>
+              <option value="en-US">English (US)</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block font-medium mb-1 text-slate-400">{t("settings.theme")}</label>
             <select
               value={props.settings.theme}
               onChange={(e) =>
@@ -44,7 +65,7 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
           </div>
 
           <div>
-            <label class="block font-medium mb-1 text-slate-400">Output Naming Template</label>
+            <label class="block font-medium mb-1 text-slate-400">{t("settings.namingTemplate")}</label>
             <input
               type="text"
               value={props.settings.namingTemplate}
@@ -57,11 +78,11 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-slate-200 font-mono text-xs"
               placeholder="{stem}_{model}_{scale}x"
             />
-            <p class="text-[10px] text-slate-500 mt-1">Available variables: {'{stem}'}, {'{model}'}, {'{scale}'}, {'{timestamp}'}</p>
+            <p class="text-[10px] text-slate-500 mt-1">{t("settings.namingTemplateHint")}</p>
           </div>
 
           <div>
-            <label class="block font-medium mb-1 text-slate-400">Metadata Policy</label>
+            <label class="block font-medium mb-1 text-slate-400">{t("settings.metadataPolicy")}</label>
             <select
               value={props.settings.metadataPolicy}
               onChange={(e) =>
@@ -72,15 +93,14 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
               }
               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-slate-200"
             >
-              <option value="preserveSafe">Preserve Safe (Color Profiles, Camera, Date)</option>
-              <option value="strip">Strip All Metadata (Maximum Privacy)</option>
+              <option value="preserveSafe">{t("settings.preserveSafe")}</option>
+              <option value="strip">{t("settings.stripAll")}</option>
             </select>
           </div>
 
           <div class="flex items-center justify-between pt-2">
             <div>
-              <span class="font-medium text-slate-300">Preserve GPS Location</span>
-              <p class="text-[11px] text-slate-500">Keep geotag coordinates in output EXIF</p>
+              <span class="font-medium text-slate-300">{t("settings.preserveGps")}</span>
             </div>
             <input
               type="checkbox"
@@ -96,7 +116,7 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
           </div>
 
           <div class="bg-slate-800/60 p-3 rounded border border-slate-700/50 text-[11px] text-slate-400">
-            <span class="text-sky-400 font-semibold">Strict Offline Guarantee:</span> Resvera never communicates with external networks during inference or image processing.
+            <span class="text-sky-400 font-semibold">{t("app.offlineMode")}:</span> Resvera never communicates with external networks during inference or image processing.
           </div>
         </div>
 
@@ -105,7 +125,7 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
             onClick={props.onClose}
             class="px-4 py-2 text-xs font-semibold bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-lg transition"
           >
-            Done
+            {t("settings.save")}
           </button>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { Component, For } from "solid-js";
 import { JobSnapshot } from "../types/ipc";
+import { useI18n } from "../i18n";
 
 interface QueueListProps {
   jobs: JobSnapshot[];
@@ -11,21 +12,23 @@ interface QueueListProps {
 }
 
 export const QueueList: Component<QueueListProps> = (props) => {
+  const { t } = useI18n();
+
   const getStatusBadge = (state: string) => {
     switch (state) {
       case "succeeded":
-        return <span class="px-2 py-0.5 text-[10px] rounded bg-emerald-950 text-emerald-400 border border-emerald-800">Done</span>;
+        return <span class="px-2 py-0.5 text-[10px] rounded bg-emerald-950 text-emerald-400 border border-emerald-800">{t("queue.completed")}</span>;
       case "running":
-        return <span class="px-2 py-0.5 text-[10px] rounded bg-sky-950 text-sky-400 border border-sky-800 animate-pulse">Running</span>;
+        return <span class="px-2 py-0.5 text-[10px] rounded bg-sky-950 text-sky-400 border border-sky-800 animate-pulse">{t("queue.processing")}</span>;
       case "preparing":
       case "finalizing":
-        return <span class="px-2 py-0.5 text-[10px] rounded bg-amber-950 text-amber-400 border border-amber-800">Processing</span>;
+        return <span class="px-2 py-0.5 text-[10px] rounded bg-amber-950 text-amber-400 border border-amber-800">{t("queue.processing")}</span>;
       case "cancelled":
-        return <span class="px-2 py-0.5 text-[10px] rounded bg-slate-800 text-slate-400 border border-slate-700">Cancelled</span>;
+        return <span class="px-2 py-0.5 text-[10px] rounded bg-slate-800 text-slate-400 border border-slate-700">{t("queue.cancelled")}</span>;
       case "failed":
-        return <span class="px-2 py-0.5 text-[10px] rounded bg-rose-950 text-rose-400 border border-rose-800">Failed</span>;
+        return <span class="px-2 py-0.5 text-[10px] rounded bg-rose-950 text-rose-400 border border-rose-800">{t("queue.failed")}</span>;
       default:
-        return <span class="px-2 py-0.5 text-[10px] rounded bg-slate-900 text-slate-400 border border-slate-800">Queued</span>;
+        return <span class="px-2 py-0.5 text-[10px] rounded bg-slate-900 text-slate-400 border border-slate-800">{t("queue.queued")}</span>;
     }
   };
 
@@ -33,13 +36,13 @@ export const QueueList: Component<QueueListProps> = (props) => {
     <div class="flex flex-col h-full bg-slate-900 border-r border-slate-800 select-none">
       <div class="flex items-center justify-between px-4 py-3 border-b border-slate-800">
         <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400">
-          Queue ({props.jobs.length})
+          {t("queue.title")} ({props.jobs.length})
         </h2>
         <button
           onClick={props.onTogglePause}
           class="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
         >
-          {props.isPaused ? "Resume Queue" : "Pause Queue"}
+          {props.isPaused ? t("queue.resume") : t("queue.pause")}
         </button>
       </div>
 
@@ -73,7 +76,7 @@ export const QueueList: Component<QueueListProps> = (props) => {
                       props.onCancelJob(job.id);
                     }}
                     class="text-slate-500 hover:text-rose-400 p-1"
-                    title="Cancel Job"
+                    title={t("queue.cancel")}
                   >
                     ✕
                   </button>
@@ -85,7 +88,7 @@ export const QueueList: Component<QueueListProps> = (props) => {
 
         {props.jobs.length === 0 && (
           <div class="p-8 text-center text-xs text-slate-500">
-            No active jobs. Drag & drop images or click Import to start.
+            {t("queue.empty")}
           </div>
         )}
       </div>
