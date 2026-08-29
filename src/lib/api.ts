@@ -124,6 +124,21 @@ export async function listModels(): Promise<ModelSummary[]> {
         { id: "denoise-3", nativeScale: 4, strength: "3" },
       ],
     },
+    {
+      id: "real-hat-gan-4x",
+      packageVersion: "1.0.0",
+      displayName: "Real-HAT-GAN 4x",
+      family: "hat",
+      category: "photo",
+      nativeScales: [4],
+      installed: true,
+      updateAvailable: false,
+      downloadSizeBytes: "76483920",
+      licenseSpdx: "Apache-2.0",
+      redistributionReview: "approved",
+      validatedProviders: ["cpu", "directml", "cuda"],
+      variants: [{ id: "default", nativeScale: 4, strength: null }],
+    },
   ];
 }
 
