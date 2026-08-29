@@ -7,15 +7,18 @@ license.workspace = true
 
 [dependencies]
 resvera-models = { path = "../resvera-models" }
+resvera-persistence = { path = "../resvera-persistence" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 image = { workspace = true }
 fast_image_resize = { workspace = true }
 uuid = { workspace = true }
+chrono = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 
 
 [dev-dependencies]
 tempfile = { workspace = true }
+resvera-engine-ort = { path = "../resvera-engine-ort" }

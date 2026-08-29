@@ -696,9 +696,12 @@ dependencies = [
 name = "resvera-core"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "fast_image_resize",
  "image",
+ "resvera-engine-ort",
  "resvera-models",
+ "resvera-persistence",
  "serde",
  "serde_json",
  "tempfile",
