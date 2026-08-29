@@ -149,6 +149,7 @@ export async function loadSettings(): Promise<AppSettings> {
   return {
     schemaVersion: 1,
     outputDirectory: null,
+    modelsDirectory: "~/.resvera/models",
     outputFormat: { kind: "png" },
     defaultModelId: "realesrgan-x4plus",
     defaultModelVariantId: "default",
@@ -158,8 +159,12 @@ export async function loadSettings(): Promise<AppSettings> {
     preserveGps: false,
     providerPreference: { kind: "automatic" },
     tileSizeOverride: null,
+    tileOverlap: 16,
+    blendMode: "cosine",
+    precision: "fp32",
+    gpuDeviceId: 0,
     overwriteExisting: false,
-    locale: "en-US",
+    locale: "zh-CN",
     theme: "dark",
     checkForUpdates: false,
   };

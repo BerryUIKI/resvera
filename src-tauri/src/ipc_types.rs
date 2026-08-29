@@ -153,6 +153,7 @@ pub struct JobHistoryPage {
 pub struct AppSettings {
     pub schema_version: u32,
     pub output_directory: Option<String>,
+    pub models_directory: Option<String>,
     pub output_format: OutputFormat,
     pub default_model_id: Option<String>,
     pub default_model_variant_id: Option<String>,
@@ -162,6 +163,10 @@ pub struct AppSettings {
     pub preserve_gps: bool,
     pub provider_preference: ProviderPreference,
     pub tile_size_override: Option<u32>,
+    pub tile_overlap: Option<u32>,
+    pub blend_mode: Option<String>,
+    pub precision: Option<String>,
+    pub gpu_device_id: Option<u32>,
     pub overwrite_existing: bool,
     pub locale: String,
     pub theme: String,
@@ -173,6 +178,7 @@ impl Default for AppSettings {
         Self {
             schema_version: 1,
             output_directory: None,
+            models_directory: Some("~/.resvera/models".into()),
             output_format: OutputFormat::Png,
             default_model_id: Some("realesrgan-x4plus".into()),
             default_model_variant_id: Some("default".into()),
@@ -182,9 +188,13 @@ impl Default for AppSettings {
             preserve_gps: false,
             provider_preference: ProviderPreference::Automatic,
             tile_size_override: None,
+            tile_overlap: Some(16),
+            blend_mode: Some("cosine".into()),
+            precision: Some("fp32".into()),
+            gpu_device_id: Some(0),
             overwrite_existing: false,
-            locale: "en-US".into(),
-            theme: "system".into(),
+            locale: "zh-CN".into(),
+            theme: "dark".into(),
             check_for_updates: false,
         }
     }
