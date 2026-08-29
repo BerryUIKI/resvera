@@ -1,11 +1,21 @@
+import { invoke } from "@tauri-apps/api/core";
 import {
   AppSettings,
+  JobSnapshot,
   ModelSummary,
+  QueueSnapshot,
   RuntimeStatus,
+  UpscaleJobRequest,
 } from "../types/ipc";
 
-// In browser / dev environment or desktop WebView, wrap Tauri invoke or provide robust local runtime
+function isTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
 export async function getRuntimeStatus(): Promise<RuntimeStatus> {
+  if (isTauri()) {
+    return await invoke<RuntimeStatus>("get_runtime_status");
+  }
   return {
     engine: {
       id: "ort",
@@ -42,6 +52,9 @@ export async function getRuntimeStatus(): Promise<RuntimeStatus> {
 }
 
 export async function listModels(): Promise<ModelSummary[]> {
+  if (isTauri()) {
+    return await invoke<ModelSummary[]>("list_models");
+  }
   return [
     {
       id: "realesrgan-x4plus",
@@ -115,6 +128,9 @@ export async function listModels(): Promise<ModelSummary[]> {
 }
 
 export async function loadSettings(): Promise<AppSettings> {
+  if (isTauri()) {
+    return await invoke<AppSettings>("load_settings");
+  }
   return {
     schemaVersion: 1,
     outputDirectory: null,
@@ -131,5 +147,31 @@ export async function loadSettings(): Promise<AppSettings> {
     locale: "en-US",
     theme: "dark",
     checkForUpdates: false,
+  };
+}
+
+export async function saveSettings(settings: AppSettings): Promise<AppSettings> {
+  if (isTauri()) {
+    return await invoke<AppSettings>("save_settings", { newSettings: settings });
+  }
+  return settings;
+}
+
+export async function createUpscaleJob(req: UpscaleJobRequest): Promise<JobSnapshot> {
+  if (isTauri()) {
+    return await invoke<JobSnapshot>("create_upscale_job", { req });
+  }
+  throw new Error("Tauri runtime required for job creation");
+}
+
+export async function getQueue(): Promise<QueueSnapshot> {
+  if (isTauri()) {
+    return await invoke<QueueSnapshot>("get_queue");
+  }
+  return {
+    paused: false,
+    activeJobId: null,
+    queuedJobIds: [],
+    revision: "rev-1",
   };
 }
