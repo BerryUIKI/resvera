@@ -50,8 +50,9 @@ fn test_ipc_commands_workflow() {
 
     // 2. List models
     let models = list_models();
-    assert_eq!(models.len(), 2);
+    assert_eq!(models.len(), 4);
     assert_eq!(models[0].id, "realesrgan-x4plus");
+    assert_eq!(models[2].id, "real-cugan-2x");
 
     // 3. Settings load and save
     let default_settings = load_settings(&state);

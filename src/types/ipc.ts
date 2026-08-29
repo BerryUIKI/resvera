@@ -149,6 +149,7 @@ export interface AppSettings {
   defaultModelId: string | null;
   defaultModelVariantId: string | null;
   defaultTargetScale: number;
+  namingTemplate: string;
   metadataPolicy: "strip" | "preserveSafe";
   preserveGps: boolean;
   providerPreference: ProviderPreference;

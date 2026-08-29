@@ -4,6 +4,7 @@ import { RuntimeStatus } from "../types/ipc";
 interface HeaderProps {
   status: RuntimeStatus | null;
   onOpenSettings: () => void;
+  onOpenModelCenter: () => void;
 }
 
 export const Header: Component<HeaderProps> = (props) => {
@@ -19,7 +20,17 @@ export const Header: Component<HeaderProps> = (props) => {
         </div>
       </div>
 
-      <div class="flex items-center space-x-4">
+      <div class="flex items-center space-x-3">
+        <button
+          onClick={props.onOpenModelCenter}
+          class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 transition"
+        >
+          <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+          </svg>
+          <span>Model Center</span>
+        </button>
+
         <div class="flex items-center space-x-2 bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/60 text-xs">
           <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
           <span class="text-emerald-300 font-medium">100% Offline Ready</span>
