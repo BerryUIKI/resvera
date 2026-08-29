@@ -12,6 +12,8 @@ pub enum ManifestError {
     UnsupportedSchemaVersion(u32),
     #[error("Invalid manifest: {0}")]
     Validation(String),
+    #[error("Security violation: path traversal detected in '{0}'")]
+    PathTraversal(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -92,6 +94,18 @@ pub struct ArtifactEntry {
     pub sha256: String,
 }
 
+fn check_safe_relative_path(path_str: &str) -> Result<(), ManifestError> {
+    if path_str.contains("..")
+        || path_str.starts_with('/')
+        || path_str.starts_with('\\')
+        || (path_str.len() > 1 && path_str.chars().nth(1) == Some(':'))
+        || path_str.contains('\0')
+    {
+        return Err(ManifestError::PathTraversal(path_str.to_string()));
+    }
+    Ok(())
+}
+
 impl ModelManifest {
     pub fn load_from_file(path: &Path) -> Result<Self, ManifestError> {
         let data = std::fs::read_to_string(path)?;
@@ -107,12 +121,23 @@ impl ModelManifest {
         if self.id.trim().is_empty() {
             return Err(ManifestError::Validation("Manifest 'id' cannot be empty".into()));
         }
+        check_safe_relative_path(&self.id)?;
+        check_safe_relative_path(&self.package_version)?;
+
         if self.variants.is_empty() {
             return Err(ManifestError::Validation("At least one variant must be defined".into()));
         }
+        for variant in &self.variants {
+            check_safe_relative_path(&variant.artifact)?;
+        }
+
         if self.artifacts.is_empty() {
             return Err(ManifestError::Validation("At least one artifact must be defined".into()));
         }
+        for artifact in &self.artifacts {
+            check_safe_relative_path(&artifact.path)?;
+        }
+
         Ok(())
     }
 }
