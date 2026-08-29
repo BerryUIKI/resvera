@@ -1,105 +1,96 @@
 # Resvera
 
-> Restore true detail in photos, illustrations, and anime—locally.
+> Restore true detail in photos, illustrations, and anime—locally and offline.
+> 纯离线、全平台的高性能 AI 图像超分辨率与画质增强桌面工具。
 
-Resvera is an open-source desktop image upscaler and restoration application. Image decoding, AI inference, post-processing, metadata handling, and output encoding run entirely on the user's device. Images and inference data are never uploaded.
+[![CI](https://github.com/BerryUIKI/resvera/actions/workflows/ci.yml/badge.svg)](https://github.com/BerryUIKI/resvera/actions/workflows/ci.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![Offline Ready](https://img.shields.io/badge/Offline-100%25-emerald.svg)](docs/SECURITY.md)
 
-Network access is limited to user-approved model downloads, runtime component updates, and application updates. Once the required model and runtime are installed, inference remains available without a network connection.
+Resvera is an open-source desktop image upscaler and restoration application built with **Rust**, **Tauri v2**, and **SolidJS**. Image decoding, ONNX Runtime inference, post-processing, metadata filtering, and output encoding run entirely on the user's device. Images, previews, and inference data are never uploaded to the cloud.
 
-## Status
+---
 
-Resvera is in architecture and feasibility development. There is no supported release yet. The project will not advertise a model/provider combination until it passes the documented export, parity, memory, and offline tests.
+## ✨ Key Features / 功能亮点
 
-## Planned Features
+- ⚡ **Pure Offline AI Super-Resolution**: 100% local image upscaling with zero network dependencies during processing.
+- 🎯 **Advanced Model Adapters**:
+  - **Real-ESRGAN x4plus** (RRDB, Photography)
+  - **Real-ESRGAN x4plus Anime** (RRDB-6B, Anime / Illustrations)
+  - **Real-CUGAN 2x / 4x** (CUGAN with Reflection Padding & Denoise levels)
+  - **Real-HAT-GAN 4x** (Transformer Self-Attention with 16px Window Alignment)
+- 🚀 **Hardware Acceleration (Execution Providers)**:
+  - Windows: **DirectML** (DirectX 12 GPU)
+  - macOS: **CoreML** (Apple Silicon Neural Engine)
+  - Linux / Windows: **CUDA** (NVIDIA Tensor Core) & **CPU SIMD** Fallback
+- 🛡️ **Cryptographic Model Center**: Staged downloads with Ed25519 signatures and per-chunk SHA-256 integrity verification.
+- 🎛️ **Precision Image Pipeline**:
+  - Rust-native cosine tile feathering & seamless overlap blending
+  - Arbitrary custom scale downsampling (Lanczos3) and 8x multi-pass cascade upscale
+  - Safe EXIF metadata preservation (automatic GPS & thumbnail stripping)
+  - Collision-safe atomic disk writing
+- 🔍 **Interactive Comparison Viewer**: Realtime before/after split slider with smooth zoom and pan controls.
+- 🌐 **Full Internationalization (i18n)**: Instant reactive switching between English (`en-US`) and Simplified Chinese (`zh-CN`).
 
-- Single-image and persistent batch queues.
-- Local ONNX Runtime inference with CPU fallback.
-- Platform acceleration through DirectML or Windows ML, CoreML, CUDA, and OpenVINO where validated.
-- Real-ESRGAN x4plus and Real-ESRGAN x4plus Anime in the MVP.
-- Planned Real-CUGAN, Remacri, and Real HAT GAN packages after validation and license review.
-- Rust-owned tiling, overlap blending, cancellation, and OOM recovery.
-- Before/after comparison with pan and zoom.
-- PNG, JPEG, and WebP input/output.
-- Native and custom output scales, including explicit cascade plans.
-- Selective metadata preservation.
-- Signed model and runtime catalogs with verification and rollback.
-- No cloud inference or implicit job-time downloads.
+---
 
-## Architecture
+## 🏗️ Architecture
 
 ```mermaid
 flowchart TD
-    UI[SolidJS UI]
+    UI[SolidJS UI + i18n]
     Core[Rust Application Core]
-    Queue[Persistent Job Queue]
-    Pipeline[Image Pipeline and Model Adapter]
+    Queue[SQLite Persistent Job Queue]
+    Pipeline[Tiling Blender + Cascade Pipeline]
+    Adapter[RRDB / CUGAN / HAT Model Adapters]
     Engine[ONNX Runtime Engine]
-    Provider[CPU or Platform Execution Provider]
+    Provider[DirectML / CoreML / CUDA / CPU]
 
-    UI <-->|Typed Tauri IPC| Core
+    UI <-->|Typed Tauri v2 IPC| Core
     Core --> Queue
     Queue --> Pipeline
-    Pipeline --> Engine
+    Pipeline --> Adapter
+    Adapter --> Engine
     Engine --> Provider
 ```
 
-The first release uses one inference engine: ONNX Runtime. DirectML, CoreML, CUDA, OpenVINO, and CPU are Execution Providers within that engine. The engine boundary remains stable so another engine can be added later without changing the queue or IPC contract.
+---
 
-## Initial Model Plan
+## 🛠️ Build & Development / 编译与开发指南
 
-| Product model | Canonical model | Native scale | Planned phase |
-|---|---|---:|---|
-| Real-ESRGAN x4plus | `RealESRGAN_x4plus` | 4x | MVP |
-| Real-ESRGAN x4plus Anime | `RealESRGAN_x4plus_anime_6B` | 4x | MVP |
-| Real-CUGAN | Official multi-scale model sets | 2x/3x/4x | v0.2 |
-| Remacri | `4x-Remacri` | 4x | v0.2, pending provenance approval |
-| Real HAT GAN x4 | `Real_HAT_GAN_SRx4` | 4x | v0.3 |
+### Prerequisites
+- [Rust](https://rustup.rs/) (v1.75+)
+- [Node.js](https://nodejs.org/) (v20+)
+- [pnpm](https://pnpm.io/) (v11+)
 
-Resvera publishes its own reproducibly exported and validated ONNX model packages. It does not treat arbitrary third-party conversions as production artifacts.
+### Development Commands
+```bash
+# 1. Install frontend dependencies
+pnpm install
 
-## Offline Guarantee
+# 2. Run frontend typecheck & build
+pnpm run check && pnpm run build
 
-For an installed model and runtime:
+# 3. Run full Rust workspace test suite (25 tests)
+cargo test --workspace
 
-- inference opens no network connections;
-- no image, path, preview, metadata, tensor, or output is uploaded;
-- no cloud fallback exists;
-- no dependency or model is downloaded when a job starts;
-- update checks can be disabled;
-- installed components continue working offline indefinitely;
-- telemetry is disabled by default.
+# 4. Launch Tauri v2 desktop development application
+pnpm tauri dev
+```
 
-Model and component downloads use explicit user consent, signed catalogs, SHA-256 verification, and atomic installation.
+---
 
-## Technology
+## 📚 Documentation / 核心文档
 
-| Layer | Technology |
-|---|---|
-| Frontend | SolidJS, TypeScript, Vite, Tailwind CSS |
-| Desktop | Tauri v2 |
-| Core | Rust, Tokio |
-| Inference | ONNX Runtime behind an application-owned engine adapter |
-| Acceleration | Platform-specific ONNX Runtime Execution Providers |
-| Model format | Signed Resvera packages containing validated ONNX artifacts |
-
-Exact dependency and runtime versions will be pinned in source control. Bundle size is secondary to reliability, offline availability, and reproducibility.
-
-## Documentation
-
+- [User Guide / 用户指南](docs/USER_GUIDE.md)
+- [Security Architecture & Threat Model](docs/SECURITY.md)
 - [System Architecture](docs/ARCHITECTURE.md)
-- [Technology Stack](docs/TECH_STACK.md)
-- [Model Package Specification](docs/MODELS_SPEC.md)
 - [API and IPC Specification](docs/API_AND_IPC_SPEC.md)
-- [Roadmap](docs/ROADMAP.md)
+- [Model Package Specification](docs/MODELS_SPEC.md)
+- [Milestone Roadmap (100% Completed)](docs/ROADMAP.md)
 
-## Development
+---
 
-Build instructions will be added after the feasibility gates and project scaffold are complete. Until then, commands in issues or draft documents should not be considered a supported build procedure.
+## 📜 License
 
-## License
-
-The intended application license is AGPL-3.0. Model packages retain their own upstream licenses and notices. A model is not published in the Resvera catalog until its provenance and redistribution status are recorded.
-
-## Acknowledgements
-
-Resvera builds on research and open-source work from the Real-ESRGAN, Real-CUGAN, HAT, ONNX Runtime, Tauri, SolidJS, and broader image-restoration communities. Model-specific attribution and license notices are included in each installed model package.
+Licensed under the GNU Affero General Public License v3.0 ([AGPL-3.0](LICENSE)).
