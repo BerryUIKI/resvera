@@ -712,6 +712,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "resvera-desktop"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "image",
+ "resvera-core",
+ "resvera-engine-ort",
+ "resvera-models",
+ "resvera-persistence",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "resvera-engine-ort"
 version = "0.1.0"
 dependencies = [

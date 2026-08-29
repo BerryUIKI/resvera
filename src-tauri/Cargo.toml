@@ -1,0 +1,23 @@
+[package]
+name = "resvera-desktop"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+resvera-core = { path = "../crates/resvera-core" }
+resvera-models = { path = "../crates/resvera-models" }
+resvera-persistence = { path = "../crates/resvera-persistence" }
+resvera-engine-ort = { path = "../crates/resvera-engine-ort" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+image = { workspace = true }

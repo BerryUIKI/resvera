@@ -5,6 +5,7 @@ members = [
     "crates/resvera-engine-ort",
     "crates/resvera-models",
     "crates/resvera-persistence",
+    "src-tauri",
 ]
 
 [workspace.package]
