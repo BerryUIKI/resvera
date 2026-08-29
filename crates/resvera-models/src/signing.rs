@@ -42,6 +42,12 @@ pub fn sign_message(signing_key: &SigningKey, message: &[u8]) -> [u8; 64] {
     sig.to_bytes()
 }
 
+pub fn sign_payload(message: &[u8], secret_key_bytes: &[u8; 32]) -> String {
+    let signing_key = SigningKey::from_bytes(secret_key_bytes);
+    let sig = sign_message(&signing_key, message);
+    hex::encode(sig)
+}
+
 pub fn verify_signature(
     verifying_key_bytes: &[u8; 32],
     message: &[u8],
@@ -52,4 +58,19 @@ pub fn verify_signature(
     let sig = Signature::from_bytes(signature_bytes);
     vk.verify(message, &sig)
         .map_err(|_| SigningError::VerificationFailed)
+}
+
+pub fn verify_signature_hex(
+    verifying_key_bytes: &[u8; 32],
+    message: &[u8],
+    signature_hex: &str,
+) -> Result<(), SigningError> {
+    let sig_vec = hex::decode(signature_hex)
+        .map_err(|e| SigningError::InvalidSignatureBytes(e.to_string()))?;
+    if sig_vec.len() != 64 {
+        return Err(SigningError::InvalidSignatureBytes("Signature must be 64 bytes".into()));
+    }
+    let mut sig_arr = [0u8; 64];
+    sig_arr.copy_from_slice(&sig_vec);
+    verify_signature(verifying_key_bytes, message, &sig_arr)
 }
