@@ -1,0 +1,15 @@
+# Agent temporary memory & scratchpad
+.agents/
+
+# Tauri & Rust
+/src-tauri/target/
+
+# Node
+/node_modules/
+/dist/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
