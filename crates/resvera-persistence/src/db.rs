@@ -217,6 +217,59 @@ impl AppDatabase {
         }
     }
 
+    pub fn get_job_by_state(&self, state: &str) -> Result<Option<JobRecord>, DatabaseError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, state, input_path, output_path, preview_path,
+                    model_id, model_package_version, model_variant_id, target_scale,
+                    engine_id, provider_id, progress_fraction, progress_stage,
+                    error_code, error_message, created_at, updated_at
+             FROM jobs WHERE state = ?1 ORDER BY created_at ASC LIMIT 1",
+        )?;
+        let mut rows = stmt.query(params![state])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(JobRecord {
+                id: row.get(0)?,
+                state: row.get(1)?,
+                input_path: row.get(2)?,
+                output_path: row.get(3)?,
+                preview_path: row.get(4)?,
+                model_id: row.get(5)?,
+                model_package_version: row.get(6)?,
+                model_variant_id: row.get(7)?,
+                target_scale: row.get(8)?,
+                engine_id: row.get(9)?,
+                provider_id: row.get(10)?,
+                progress_fraction: row.get(11)?,
+                progress_stage: row.get(12)?,
+                error_code: row.get(13)?,
+                error_message: row.get(14)?,
+                created_at: row.get(15)?,
+                updated_at: row.get(16)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn update_job_success(
+        &self,
+        id: &str,
+        output_path: &str,
+        preview_path: &str,
+    ) -> Result<(), DatabaseError> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE jobs 
+             SET state = 'succeeded', output_path = ?1, preview_path = ?2, 
+                 progress_fraction = 1.0, progress_stage = 'finalizing', updated_at = ?3 
+             WHERE id = ?4",
+            params![output_path, preview_path, now, id],
+        )?;
+        Ok(())
+    }
+
     /// Performs the crash recovery sweep on startup:
     /// In-flight jobs ('preparing', 'running', 'finalizing') are converted to 'interrupted'.
     /// Returns the count of recovered jobs.
