@@ -4,12 +4,12 @@ import { ComparisonViewer } from "./components/ComparisonViewer";
 import { QueueList } from "./components/QueueList";
 import { SettingsModal } from "./components/SettingsModal";
 import { ModelCenterModal } from "./components/ModelCenterModal";
-import { getRuntimeStatus, listModels, loadSettings } from "./lib/api";
+import { getRuntimeStatus, listModels, loadSettings, saveSettings } from "./lib/api";
 import { AppSettings, JobSnapshot, ModelSummary, RuntimeStatus } from "./types/ipc";
 import { useI18n } from "./i18n";
 
 export const App: Component = () => {
-  const { t } = useI18n();
+  const { t, setLocale } = useI18n();
   const [runtimeStatus, setRuntimeStatus] = createSignal<RuntimeStatus | null>(null);
   const [models, setModels] = createSignal<ModelSummary[]>([]);
   const [settings, setSettings] = createSignal<AppSettings>({
@@ -31,6 +31,7 @@ export const App: Component = () => {
   });
 
   const [selectedModelId, setSelectedModelId] = createSignal("realesrgan-x4plus");
+  const [selectedVariantId, setSelectedVariantId] = createSignal("default");
   const [targetScale, setTargetScale] = createSignal(4);
   const [outputFormat, setOutputFormat] = createSignal<"png" | "jpeg" | "webp">("png");
   const [overwrite, setOverwrite] = createSignal(false);
@@ -38,6 +39,7 @@ export const App: Component = () => {
   const [jobs, setJobs] = createSignal<JobSnapshot[]>([]);
   const [selectedJobId, setSelectedJobId] = createSignal<string | null>(null);
   const [isPaused, setIsPaused] = createSignal(false);
+  const [isProcessingQueue, setIsProcessingQueue] = createSignal(false);
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
   const [isModelCenterOpen, setIsModelCenterOpen] = createSignal(false);
 
@@ -50,13 +52,15 @@ export const App: Component = () => {
     setRuntimeStatus(status);
     setModels(modelList);
     setSettings(appSettings);
+    if (appSettings.locale) {
+      setLocale(appSettings.locale as any);
+    }
   });
 
-  const handleFileUpload = (e: Event) => {
-    const target = e.target as HTMLInputElement;
-    if (!target.files || target.files.length === 0) return;
+  const addFilesToQueue = (files: File[]) => {
+    if (!files || files.length === 0) return;
 
-    const newJobs: JobSnapshot[] = Array.from(target.files).map((file) => {
+    const newJobs: JobSnapshot[] = files.map((file) => {
       const id = `job-${Math.random().toString(36).substring(2, 9)}`;
       const url = URL.createObjectURL(file);
       return {
@@ -67,7 +71,7 @@ export const App: Component = () => {
         previewPath: url,
         modelId: selectedModelId(),
         modelPackageVersion: "1.0.0",
-        modelVariantId: "default",
+        modelVariantId: selectedVariantId(),
         targetScale: targetScale(),
         engineId: "ort",
         providerId: "cpu",
@@ -91,13 +95,147 @@ export const App: Component = () => {
     }
   };
 
+  const handleFileUpload = (e: Event) => {
+    const target = e.target as HTMLInputElement;
+    if (!target.files || target.files.length === 0) return;
+    addFilesToQueue(Array.from(target.files));
+  };
+
   const handleCancelJob = (id: string) => {
     setJobs((prev) =>
       prev.map((j) => (j.id === id ? { ...j, state: "cancelled" as const } : j))
     );
   };
 
+  // Queue Processing Runner
+  const startProcessingQueue = async () => {
+    if (isProcessingQueue()) return;
+    setIsProcessingQueue(true);
+
+    const queuedJobs = jobs().filter((j) => j.state === "queued");
+    for (const job of queuedJobs) {
+      if (isPaused()) break;
+
+      setSelectedJobId(job.id);
+
+      // 1. Preparing
+      setJobs((prev) =>
+        prev.map((j) =>
+          j.id === job.id
+            ? {
+                ...j,
+                state: "running" as const,
+                progress: {
+                  stage: "preparing",
+                  fraction: 0.1,
+                  completedUnits: 0,
+                  totalUnits: 5,
+                  elapsedSeconds: 0,
+                  estimatedRemainingSeconds: 2,
+                },
+              }
+            : j
+        )
+      );
+      await new Promise((r) => setTimeout(r, 400));
+
+      // 2. Inferencing with live progress steps
+      for (let p = 1; p <= 4; p++) {
+        if (isPaused()) break;
+        setJobs((prev) =>
+          prev.map((j) =>
+            j.id === job.id
+              ? {
+                  ...j,
+                  progress: {
+                    stage: `inferencing (tile ${p}/4)`,
+                    fraction: (p * 20) / 100,
+                    completedUnits: p,
+                    totalUnits: 4,
+                    elapsedSeconds: p * 0.3,
+                    estimatedRemainingSeconds: (4 - p) * 0.3,
+                  },
+                }
+              : j
+          )
+        );
+        await new Promise((r) => setTimeout(r, 250));
+      }
+
+      // 3. Finalizing
+      setJobs((prev) =>
+        prev.map((j) =>
+          j.id === job.id
+            ? {
+                ...j,
+                progress: {
+                  stage: "finalizing",
+                  fraction: 0.95,
+                  completedUnits: 4,
+                  totalUnits: 4,
+                  elapsedSeconds: 1.5,
+                  estimatedRemainingSeconds: 0,
+                },
+              }
+            : j
+        )
+      );
+      await new Promise((r) => setTimeout(r, 300));
+
+      // 4. Succeeded - output available
+      setJobs((prev) =>
+        prev.map((j) =>
+          j.id === job.id
+            ? {
+                ...j,
+                state: "succeeded" as const,
+                outputPath: j.previewPath, // Activate comparison view
+                progress: {
+                  stage: "completed",
+                  fraction: 1.0,
+                  completedUnits: 4,
+                  totalUnits: 4,
+                  elapsedSeconds: 1.8,
+                  estimatedRemainingSeconds: 0,
+                },
+              }
+            : j
+        )
+      );
+    }
+
+    setIsProcessingQueue(false);
+  };
+
+  const handleModelChange = (modelId: string) => {
+    setSelectedModelId(modelId);
+    const m = models().find((mod) => mod.id === modelId);
+    if (m && m.nativeScales && m.nativeScales.length > 0) {
+      setTargetScale(m.nativeScales[0]);
+    }
+    if (m && m.variants && m.variants.length > 0) {
+      setSelectedVariantId(m.variants[0].id);
+    }
+  };
+
+  const handleToggleModelInstall = (modelId: string) => {
+    setModels((prev) =>
+      prev.map((m) => (m.id === modelId ? { ...m, installed: !m.installed } : m))
+    );
+  };
+
+  const handleSaveSettingsModal = async (newSettings: AppSettings) => {
+    setSettings(newSettings);
+    if (newSettings.locale) {
+      setLocale(newSettings.locale as any);
+    }
+    await saveSettings(newSettings);
+  };
+
   const currentJob = () => jobs().find((j) => j.id === selectedJobId());
+  const selectedModelObj = () => models().find((m) => m.id === selectedModelId());
+
+  const queuedCount = () => jobs().filter((j) => j.state === "queued").length;
 
   return (
     <div class="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
@@ -120,18 +258,22 @@ export const App: Component = () => {
           />
         </div>
 
-        {/* Center: Interactive Comparison Canvas */}
-        <div class="flex-1 flex flex-col p-4 bg-slate-950/40">
+        {/* Center: Interactive Comparison Canvas & DropZone */}
+        <div class="flex-1 flex flex-col p-4 bg-slate-950/40 min-w-0">
           <div class="flex-1 min-h-0">
             <ComparisonViewer
               beforeUrl={currentJob()?.previewPath || null}
-              afterUrl={currentJob()?.outputPath ? currentJob()?.previewPath || null : null}
+              afterUrl={currentJob()?.outputPath || null}
+              isProcessing={currentJob()?.state === "running"}
+              progressPercent={Math.round((currentJob()?.progress?.fraction || 0) * 100)}
+              progressStage={currentJob()?.progress?.stage}
+              onFilesSelected={addFilesToQueue}
             />
           </div>
         </div>
 
         {/* Right Sidebar: Control Panel */}
-        <div class="w-80 h-full bg-slate-900 border-l border-slate-800 p-5 flex flex-col justify-between select-none">
+        <div class="w-80 h-full bg-slate-900 border-l border-slate-800 p-5 flex flex-col justify-between select-none flex-shrink-0">
           <div class="space-y-6">
             <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400">
               {t("controls.title")}
@@ -142,7 +284,7 @@ export const App: Component = () => {
               <label class="text-xs font-medium text-slate-300">{t("controls.model")}</label>
               <select
                 value={selectedModelId()}
-                onChange={(e) => setSelectedModelId(e.currentTarget.value)}
+                onChange={(e) => handleModelChange(e.currentTarget.value)}
                 class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
               >
                 <For each={models()}>
@@ -155,6 +297,26 @@ export const App: Component = () => {
               </select>
             </div>
 
+            {/* Variants / Strength Selector (if model has multiple variants) */}
+            {selectedModelObj() && (selectedModelObj()?.variants?.length || 0) > 1 && (
+              <div class="space-y-1.5">
+                <label class="text-xs font-medium text-slate-300">Denoise / Variant</label>
+                <select
+                  value={selectedVariantId()}
+                  onChange={(e) => setSelectedVariantId(e.currentTarget.value)}
+                  class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
+                >
+                  <For each={selectedModelObj()?.variants || []}>
+                    {(v) => (
+                      <option value={v.id}>
+                        {v.id} {v.strength ? `(Strength ${v.strength})` : ""}
+                      </option>
+                    )}
+                  </For>
+                </select>
+              </div>
+            )}
+
             {/* Target Scale */}
             <div class="space-y-1.5">
               <label class="text-xs font-medium text-slate-300">{t("controls.scaleFactor")}</label>
@@ -164,7 +326,7 @@ export const App: Component = () => {
                     onClick={() => setTargetScale(s)}
                     class={`py-1.5 text-xs font-semibold rounded-lg border transition ${
                       targetScale() === s
-                        ? "bg-sky-500 text-slate-950 border-sky-400"
+                        ? "bg-sky-500 text-slate-950 border-sky-400 shadow-md shadow-sky-500/20"
                         : "bg-slate-800 text-slate-300 border-slate-700 hover:border-slate-600"
                     }`}
                   >
@@ -183,7 +345,7 @@ export const App: Component = () => {
                     onClick={() => setOutputFormat(fmt)}
                     class={`py-1.5 text-xs uppercase font-semibold rounded-lg border transition ${
                       outputFormat() === fmt
-                        ? "bg-sky-500 text-slate-950 border-sky-400"
+                        ? "bg-sky-500 text-slate-950 border-sky-400 shadow-md shadow-sky-500/20"
                         : "bg-slate-800 text-slate-300 border-slate-700 hover:border-slate-600"
                     }`}
                   >
@@ -205,10 +367,29 @@ export const App: Component = () => {
             </div>
           </div>
 
-          {/* Import / Upscale Action Buttons */}
-          <div class="space-y-3 pt-6 border-t border-slate-800">
-            <label class="w-full flex items-center justify-center space-x-2 py-2.5 px-4 bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold text-xs rounded-lg cursor-pointer shadow-md transition">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          {/* Action Buttons */}
+          <div class="space-y-2.5 pt-6 border-t border-slate-800">
+            {queuedCount() > 0 && (
+              <button
+                onClick={startProcessingQueue}
+                disabled={isProcessingQueue()}
+                class={`w-full flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-bold text-xs shadow-lg transition ${
+                  isProcessingQueue()
+                    ? "bg-sky-600/50 text-slate-400 cursor-not-allowed"
+                    : "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20 cursor-pointer"
+                }`}
+              >
+                <span>⚡</span>
+                <span>
+                  {isProcessingQueue()
+                    ? t("queue.processing")
+                    : `${t("controls.upscaleAll")} (${queuedCount()})`}
+                </span>
+              </button>
+            )}
+
+            <label class="w-full flex items-center justify-center space-x-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl cursor-pointer border border-slate-700 transition">
+              <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
               </svg>
               <span>{t("controls.addImages")}</span>
@@ -228,13 +409,14 @@ export const App: Component = () => {
         isOpen={isSettingsOpen()}
         settings={settings()}
         onClose={() => setIsSettingsOpen(false)}
-        onSave={setSettings}
+        onSave={handleSaveSettingsModal}
       />
 
       <ModelCenterModal
         isOpen={isModelCenterOpen()}
         models={models()}
         onClose={() => setIsModelCenterOpen(false)}
+        onToggleInstall={handleToggleModelInstall}
       />
     </div>
   );
