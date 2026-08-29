@@ -30,5 +30,6 @@ tokio = { version = "1.40", features = ["full"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 fast_image_resize = "5.1"
 hex = "0.4"
+regex = "1.10"
 tauri = { version = "2.0" }
 tauri-build = { version = "2.0" }

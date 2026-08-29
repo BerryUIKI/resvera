@@ -2786,6 +2786,7 @@ dependencies = [
  "chrono",
  "fast_image_resize",
  "image",
+ "regex",
  "resvera-engine-ort",
  "resvera-models",
  "resvera-persistence",
