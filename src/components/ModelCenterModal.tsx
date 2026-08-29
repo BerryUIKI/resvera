@@ -1,5 +1,6 @@
 import { Component, For } from "solid-js";
 import { ModelSummary } from "../types/ipc";
+import { useI18n } from "../i18n";
 
 interface ModelCenterModalProps {
   isOpen: boolean;
@@ -8,6 +9,7 @@ interface ModelCenterModalProps {
 }
 
 export const ModelCenterModal: Component<ModelCenterModalProps> = (props) => {
+  const { t } = useI18n();
   if (!props.isOpen) return null;
 
   return (
@@ -16,12 +18,12 @@ export const ModelCenterModal: Component<ModelCenterModalProps> = (props) => {
         <div class="flex items-center justify-between border-b border-slate-800 pb-3">
           <div>
             <h2 class="text-base font-semibold text-slate-100 flex items-center space-x-2">
-              <span>Signed Model Center</span>
+              <span>{t("modelCenter.title")}</span>
               <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">
-                Ed25519 Verified
+                {t("modelCenter.verifiedBadge")}
               </span>
             </h2>
-            <p class="text-xs text-slate-400">Offline-ready signed model packages and rollback management</p>
+            <p class="text-xs text-slate-400">{t("modelCenter.description")}</p>
           </div>
           <button
             onClick={props.onClose}
@@ -46,11 +48,11 @@ export const ModelCenterModal: Component<ModelCenterModalProps> = (props) => {
                     </span>
                   </div>
                   <div class="flex items-center space-x-3 text-xs text-slate-400">
-                    <span>License: <strong class="text-slate-300">{model.licenseSpdx}</strong></span>
+                    <span>{t("modelCenter.license")}: <strong class="text-slate-300">{model.licenseSpdx}</strong></span>
                     <span>•</span>
                     <span>Size: <strong class="text-slate-300">{((Number(model.downloadSizeBytes || 0)) / 1024 / 1024).toFixed(1)} MB</strong></span>
                     <span>•</span>
-                    <span>Providers: <strong class="text-slate-300">{model.validatedProviders.join(", ")}</strong></span>
+                    <span>{t("modelCenter.providers")}: <strong class="text-slate-300">{model.validatedProviders.join(", ")}</strong></span>
                   </div>
                 </div>
 
@@ -58,12 +60,12 @@ export const ModelCenterModal: Component<ModelCenterModalProps> = (props) => {
                   {model.installed ? (
                     <div class="flex items-center space-x-2">
                       <span class="px-3 py-1 text-xs font-semibold rounded-lg bg-emerald-900/60 text-emerald-300 border border-emerald-700/60">
-                        ✓ Active
+                        ✓ {t("modelCenter.installed")}
                       </span>
                     </div>
                   ) : (
                     <button class="px-3 py-1 text-xs font-semibold rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 transition">
-                      Install
+                      {t("modelCenter.download")}
                     </button>
                   )}
                 </div>
@@ -78,7 +80,7 @@ export const ModelCenterModal: Component<ModelCenterModalProps> = (props) => {
             onClick={props.onClose}
             class="px-4 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition"
           >
-            Close
+            {t("settings.cancel")}
           </button>
         </div>
       </div>

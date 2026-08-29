@@ -1,4 +1,5 @@
 import { Component, createSignal } from "solid-js";
+import { useI18n } from "../i18n";
 
 interface ComparisonViewerProps {
   beforeUrl: string | null;
@@ -6,6 +7,7 @@ interface ComparisonViewerProps {
 }
 
 export const ComparisonViewer: Component<ComparisonViewerProps> = (props) => {
+  const { t } = useI18n();
   const [splitPos, setSplitPos] = createSignal(50);
   const [zoom, setZoom] = createSignal(1);
 
@@ -55,7 +57,7 @@ export const ComparisonViewer: Component<ComparisonViewerProps> = (props) => {
           {/* Range Slider for Split */}
           {props.afterUrl && (
             <div class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center space-x-3 bg-slate-900/90 backdrop-blur px-4 py-2 rounded-full border border-slate-700 shadow-lg">
-              <span class="text-xs text-slate-400 font-medium">Before</span>
+              <span class="text-xs text-slate-400 font-medium">{t("viewer.before")}</span>
               <input
                 type="range"
                 min="0"
@@ -64,7 +66,7 @@ export const ComparisonViewer: Component<ComparisonViewerProps> = (props) => {
                 onInput={(e) => setSplitPos(Number(e.currentTarget.value))}
                 class="w-48 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-sky-400"
               />
-              <span class="text-xs text-slate-400 font-medium">After</span>
+              <span class="text-xs text-slate-400 font-medium">{t("viewer.after")}</span>
             </div>
           )}
 
@@ -90,7 +92,7 @@ export const ComparisonViewer: Component<ComparisonViewerProps> = (props) => {
           <svg class="w-16 h-16 mb-4 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
-          <p class="text-sm font-medium text-slate-400">Select an image to preview comparison</p>
+          <p class="text-sm font-medium text-slate-400">{t("viewer.noImageSelected")}</p>
           <p class="text-xs text-slate-600 mt-1">PNG, JPEG, and WebP supported locally</p>
         </div>
       )}

@@ -6,8 +6,10 @@ import { SettingsModal } from "./components/SettingsModal";
 import { ModelCenterModal } from "./components/ModelCenterModal";
 import { getRuntimeStatus, listModels, loadSettings } from "./lib/api";
 import { AppSettings, JobSnapshot, ModelSummary, RuntimeStatus } from "./types/ipc";
+import { useI18n } from "./i18n";
 
 export const App: Component = () => {
+  const { t } = useI18n();
   const [runtimeStatus, setRuntimeStatus] = createSignal<RuntimeStatus | null>(null);
   const [models, setModels] = createSignal<ModelSummary[]>([]);
   const [settings, setSettings] = createSignal<AppSettings>({
@@ -23,7 +25,7 @@ export const App: Component = () => {
     providerPreference: { kind: "automatic" },
     tileSizeOverride: null,
     overwriteExisting: false,
-    locale: "en-US",
+    locale: "zh-CN",
     theme: "dark",
     checkForUpdates: false,
   });
@@ -132,12 +134,12 @@ export const App: Component = () => {
         <div class="w-80 h-full bg-slate-900 border-l border-slate-800 p-5 flex flex-col justify-between select-none">
           <div class="space-y-6">
             <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Upscale Parameters
+              {t("controls.title")}
             </h2>
 
             {/* Model Selector */}
             <div class="space-y-1.5">
-              <label class="text-xs font-medium text-slate-300">Model</label>
+              <label class="text-xs font-medium text-slate-300">{t("controls.model")}</label>
               <select
                 value={selectedModelId()}
                 onChange={(e) => setSelectedModelId(e.currentTarget.value)}
@@ -155,7 +157,7 @@ export const App: Component = () => {
 
             {/* Target Scale */}
             <div class="space-y-1.5">
-              <label class="text-xs font-medium text-slate-300">Scale Factor</label>
+              <label class="text-xs font-medium text-slate-300">{t("controls.scaleFactor")}</label>
               <div class="grid grid-cols-4 gap-2">
                 {[1, 2, 4, 8].map((s) => (
                   <button
@@ -174,7 +176,7 @@ export const App: Component = () => {
 
             {/* Output Format */}
             <div class="space-y-1.5">
-              <label class="text-xs font-medium text-slate-300">Output Format</label>
+              <label class="text-xs font-medium text-slate-300">{t("controls.outputFormat")}</label>
               <div class="grid grid-cols-3 gap-2">
                 {(["png", "jpeg", "webp"] as const).map((fmt) => (
                   <button
@@ -193,7 +195,7 @@ export const App: Component = () => {
 
             {/* Overwrite Toggle */}
             <div class="flex items-center justify-between pt-2">
-              <span class="text-xs text-slate-300 font-medium">Overwrite Existing</span>
+              <span class="text-xs text-slate-300 font-medium">{t("controls.overwriteExisting")}</span>
               <input
                 type="checkbox"
                 checked={overwrite()}
@@ -209,7 +211,7 @@ export const App: Component = () => {
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
               </svg>
-              <span>Add Images to Queue</span>
+              <span>{t("controls.addImages")}</span>
               <input
                 type="file"
                 multiple
