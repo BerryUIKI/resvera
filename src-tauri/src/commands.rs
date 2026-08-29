@@ -172,6 +172,23 @@ pub fn list_models() -> Vec<ModelSummary> {
                 ModelVariantSummary { id: "denoise-3".into(), native_scale: 4, strength: Some("3".into()) },
             ],
         },
+        ModelSummary {
+            id: "real-hat-gan-4x".into(),
+            package_version: "1.0.0".into(),
+            display_name: "Real-HAT-GAN 4x".into(),
+            family: "hat".into(),
+            category: "photo".into(),
+            native_scales: vec![4],
+            installed: true,
+            update_available: false,
+            download_size_bytes: Some("76483920".into()),
+            license_spdx: "Apache-2.0".into(),
+            redistribution_review: "approved".into(),
+            validated_providers: vec!["cpu".into(), "directml".into(), "cuda".into()],
+            variants: vec![
+                ModelVariantSummary { id: "default".into(), native_scale: 4, strength: None },
+            ],
+        },
     ]
 }
 

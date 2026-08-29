@@ -263,3 +263,118 @@ impl ModelAdapter for CuganAdapter {
     }
 }
 
+pub struct HatAdapter {
+    pub scale: u32,
+    pub window_size: u32,
+}
+
+impl Default for HatAdapter {
+    fn default() -> Self {
+        Self {
+            scale: 4,
+            window_size: 16,
+        }
+    }
+}
+
+impl HatAdapter {
+    pub fn new(scale: u32, window_size: u32) -> Self {
+        Self { scale, window_size }
+    }
+}
+
+impl ModelAdapter for HatAdapter {
+    fn family(&self) -> &'static str {
+        "hat"
+    }
+
+    fn validate_manifest(&self, manifest: &ModelManifest) -> Result<(), PipelineError> {
+        if manifest.family != "hat" && manifest.family != "real-hat" && manifest.family != "real-hat-gan" {
+            return Err(PipelineError::Validation(format!(
+                "Unsupported family for HatAdapter: {}",
+                manifest.family
+            )));
+        }
+        if manifest.tensor.layout != "NCHW" || manifest.tensor.channels != "RGB" {
+            return Err(PipelineError::Validation(
+                "HatAdapter requires NCHW RGB layout".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn tile_constraints(&self, manifest: &ModelManifest) -> TileConstraints {
+        TileConstraints {
+            alignment: manifest.tiling.alignment.max(self.window_size),
+            minimum: manifest.tiling.minimum.max(64),
+            recommended: manifest.tiling.recommended.max(256),
+            overlap: manifest.tiling.overlap.max(self.window_size),
+            window_size: Some(self.window_size),
+            static_shapes_required: manifest.tiling.static_shapes_required,
+        }
+    }
+
+    fn preprocess(&self, tile: &RgbImage) -> Result<OwnedTensor, PipelineError> {
+        let (width, height) = tile.dimensions();
+        let pad_w = if width % self.window_size == 0 {
+            0
+        } else {
+            self.window_size - (width % self.window_size)
+        };
+        let pad_h = if height % self.window_size == 0 {
+            0
+        } else {
+            self.window_size - (height % self.window_size)
+        };
+
+        let target_w = (width + pad_w) as usize;
+        let target_h = (height + pad_h) as usize;
+        let plane_size = target_w * target_h;
+
+        let mut data = vec![0.0f32; 3 * plane_size];
+
+        for y in 0..target_h {
+            let sy = (y as u32).min(height - 1);
+            for x in 0..target_w {
+                let sx = (x as u32).min(width - 1);
+                let pixel = tile.get_pixel(sx, sy);
+                let idx = y * target_w + x;
+
+                data[idx] = pixel[0] as f32 / 255.0;
+                data[plane_size + idx] = pixel[1] as f32 / 255.0;
+                data[2 * plane_size + idx] = pixel[2] as f32 / 255.0;
+            }
+        }
+
+        OwnedTensor::new([1, 3, target_h, target_w], data).map_err(PipelineError::Engine)
+    }
+
+    fn postprocess(&self, output: &OwnedTensor) -> Result<RgbImage, PipelineError> {
+        if output.shape[0] != 1 || output.shape[1] != 3 {
+            return Err(PipelineError::DimensionMismatch(format!(
+                "Expected shape [1, 3, H, W], got {:?}",
+                output.shape
+            )));
+        }
+
+        let h = output.shape[2];
+        let w = output.shape[3];
+        let plane_size = w * h;
+
+        let mut img = RgbImage::new(w as u32, h as u32);
+
+        for y in 0..h {
+            for x in 0..w {
+                let idx = y * w + x;
+                let r = (output.data[idx].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let g = (output.data[plane_size + idx].clamp(0.0, 1.0) * 255.0).round() as u8;
+                let b = (output.data[2 * plane_size + idx].clamp(0.0, 1.0) * 255.0).round() as u8;
+
+                img.put_pixel(x as u32, y as u32, image::Rgb([r, g, b]));
+            }
+        }
+
+        Ok(img)
+    }
+}
+
