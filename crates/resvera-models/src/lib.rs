@@ -1,7 +1,11 @@
+pub mod catalog;
+pub mod downloader;
+pub mod installer;
 pub mod manifest;
 pub mod signing;
-pub mod installer;
 
+pub use catalog::*;
+pub use downloader::*;
+pub use installer::*;
 pub use manifest::*;
 pub use signing::*;
-pub use installer::*;
