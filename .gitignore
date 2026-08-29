@@ -1,6 +1,22 @@
 # Agent temporary memory & scratchpad
 .agents/
 
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Export Artifacts & Models
+artifacts/
+*.onnx
+*.pth
+*.pt
+
+# Rust
+target/
+
+
+
 # Tauri & Rust
 /src-tauri/target/
 
@@ -13,3 +29,4 @@
 Thumbs.db
 .vscode/
 .idea/
+
