@@ -1,4 +1,4 @@
-import { Component, For } from "solid-js";
+import { Component, For, createSignal } from "solid-js";
 import { ModelSummary } from "../types/ipc";
 import { useI18n } from "../i18n";
 
@@ -6,11 +6,31 @@ interface ModelCenterModalProps {
   isOpen: boolean;
   models: ModelSummary[];
   onClose: () => void;
+  onToggleInstall?: (modelId: string) => void;
 }
 
 export const ModelCenterModal: Component<ModelCenterModalProps> = (props) => {
   const { t } = useI18n();
+  const [downloadingId, setDownloadingId] = createSignal<string | null>(null);
+  const [progress, setProgress] = createSignal(0);
+
   if (!props.isOpen) return null;
+
+  const handleInstall = (modelId: string) => {
+    setDownloadingId(modelId);
+    setProgress(15);
+    const interval = setInterval(() => {
+      setProgress((p) => {
+        if (p >= 100) {
+          clearInterval(interval);
+          setDownloadingId(null);
+          props.onToggleInstall?.(modelId);
+          return 0;
+        }
+        return p + 25;
+      });
+    }, 200);
+  };
 
   return (
     <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -57,14 +77,28 @@ export const ModelCenterModal: Component<ModelCenterModalProps> = (props) => {
                 </div>
 
                 <div class="flex items-center space-x-2">
-                  {model.installed ? (
+                  {downloadingId() === model.id ? (
+                    <div class="flex items-center space-x-2 bg-slate-800 px-3 py-1.5 rounded-lg border border-sky-500/50">
+                      <span class="w-3 h-3 border-2 border-sky-400 border-t-transparent rounded-full animate-spin"></span>
+                      <span class="text-xs text-sky-400 font-mono">{progress()}%</span>
+                    </div>
+                  ) : model.installed ? (
                     <div class="flex items-center space-x-2">
                       <span class="px-3 py-1 text-xs font-semibold rounded-lg bg-emerald-900/60 text-emerald-300 border border-emerald-700/60">
                         ✓ {t("modelCenter.installed")}
                       </span>
+                      <button
+                        onClick={() => props.onToggleInstall?.(model.id)}
+                        class="text-[11px] px-2 py-1 rounded bg-slate-800 hover:bg-rose-950 text-slate-400 hover:text-rose-300 border border-slate-700 transition"
+                      >
+                        {t("modelCenter.remove")}
+                      </button>
                     </div>
                   ) : (
-                    <button class="px-3 py-1 text-xs font-semibold rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 transition">
+                    <button
+                      onClick={() => handleInstall(model.id)}
+                      class="px-3.5 py-1 text-xs font-semibold rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 shadow-md transition"
+                    >
                       {t("modelCenter.download")}
                     </button>
                   )}
