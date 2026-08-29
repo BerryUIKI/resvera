@@ -145,6 +145,7 @@ export interface QueueSnapshot {
 export interface AppSettings {
   schemaVersion: number;
   outputDirectory: string | null;
+  modelsDirectory: string | null;
   outputFormat: OutputFormat;
   defaultModelId: string | null;
   defaultModelVariantId: string | null;
@@ -154,6 +155,10 @@ export interface AppSettings {
   preserveGps: boolean;
   providerPreference: ProviderPreference;
   tileSizeOverride: number | null;
+  tileOverlap: number | null;
+  blendMode: string | null;
+  precision: "fp32" | "fp16" | null;
+  gpuDeviceId: number | null;
   overwriteExisting: boolean;
   locale: string;
   theme: "system" | "light" | "dark";
