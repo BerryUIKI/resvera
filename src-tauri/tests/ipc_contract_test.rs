@@ -44,7 +44,7 @@ fn test_ipc_commands_workflow() {
     };
 
     // 1. Get runtime status
-    let status = get_runtime_status(&state).unwrap();
+    let status = get_runtime_status_impl(&state).unwrap();
     assert!(status.offline_ready);
     assert_eq!(status.engine.id, "ort");
 
@@ -55,12 +55,12 @@ fn test_ipc_commands_workflow() {
     assert_eq!(models[2].id, "real-cugan-2x");
 
     // 3. Settings load and save
-    let default_settings = load_settings(&state);
+    let default_settings = load_settings_impl(&state);
     assert_eq!(default_settings.schema_version, 1);
 
     let mut new_settings = default_settings.clone();
     new_settings.theme = "dark".into();
-    let saved = save_settings(&state, new_settings);
+    let saved = save_settings_impl(&state, new_settings);
     assert_eq!(saved.theme, "dark");
 
     // 4. Create and retrieve job
@@ -80,10 +80,10 @@ fn test_ipc_commands_workflow() {
         provider_preference: Some("cpu".to_string()),
     };
 
-    let snapshot = create_upscale_job(&state, req).unwrap();
+    let snapshot = create_upscale_job_impl(&state, req).unwrap();
     assert_eq!(snapshot.state, "queued");
 
-    let fetched = get_job(&state, &snapshot.id).unwrap();
+    let fetched = get_job_impl(&state, &snapshot.id).unwrap();
     assert_eq!(fetched.id, snapshot.id);
     assert_eq!(fetched.state, "queued");
 }

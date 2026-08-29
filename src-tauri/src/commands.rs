@@ -43,7 +43,7 @@ fn job_record_to_snapshot(record: JobRecord) -> JobSnapshot {
     }
 }
 
-pub fn get_runtime_status(state: &AppState) -> Result<RuntimeStatus, ApiError> {
+pub fn get_runtime_status_impl(state: &AppState) -> Result<RuntimeStatus, ApiError> {
     let caps = state.orchestrator.engine.capabilities();
     let health = state.orchestrator.engine.probe().map_err(|e| ApiError {
         code: ErrorCode::EngineUnavailable,
@@ -88,6 +88,12 @@ pub fn get_runtime_status(state: &AppState) -> Result<RuntimeStatus, ApiError> {
     })
 }
 
+#[tauri::command]
+pub fn get_runtime_status(state: tauri::State<'_, AppState>) -> Result<RuntimeStatus, ApiError> {
+    get_runtime_status_impl(&state)
+}
+
+#[tauri::command]
 pub fn list_models() -> Vec<ModelSummary> {
     vec![
         ModelSummary {
@@ -169,7 +175,7 @@ pub fn list_models() -> Vec<ModelSummary> {
     ]
 }
 
-pub fn create_upscale_job(state: &AppState, req: CoreJobRequest) -> Result<JobSnapshot, ApiError> {
+pub fn create_upscale_job_impl(state: &AppState, req: CoreJobRequest) -> Result<JobSnapshot, ApiError> {
     let job = state
         .orchestrator
         .submit_job(&req)
@@ -182,7 +188,12 @@ pub fn create_upscale_job(state: &AppState, req: CoreJobRequest) -> Result<JobSn
     Ok(job_record_to_snapshot(job))
 }
 
-pub fn create_batch_jobs(
+#[tauri::command]
+pub fn create_upscale_job(state: tauri::State<'_, AppState>, req: CoreJobRequest) -> Result<JobSnapshot, ApiError> {
+    create_upscale_job_impl(&state, req)
+}
+
+pub fn create_batch_jobs_impl(
     state: &AppState,
     req: CoreBatchRequest,
 ) -> Result<Vec<JobSnapshot>, ApiError> {
@@ -198,7 +209,15 @@ pub fn create_batch_jobs(
     Ok(jobs.into_iter().map(job_record_to_snapshot).collect())
 }
 
-pub fn cancel_job(state: &AppState, job_id: &str) -> Result<JobSnapshot, ApiError> {
+#[tauri::command]
+pub fn create_batch_jobs(
+    state: tauri::State<'_, AppState>,
+    req: CoreBatchRequest,
+) -> Result<Vec<JobSnapshot>, ApiError> {
+    create_batch_jobs_impl(&state, req)
+}
+
+pub fn cancel_job_impl(state: &AppState, job_id: &str) -> Result<JobSnapshot, ApiError> {
     state
         .orchestrator
         .cancel_job(job_id)
@@ -229,17 +248,32 @@ pub fn cancel_job(state: &AppState, job_id: &str) -> Result<JobSnapshot, ApiErro
     Ok(job_record_to_snapshot(record))
 }
 
-pub fn pause_queue(state: &AppState) -> QueueSnapshot {
+#[tauri::command]
+pub fn cancel_job(state: tauri::State<'_, AppState>, job_id: String) -> Result<JobSnapshot, ApiError> {
+    cancel_job_impl(&state, &job_id)
+}
+
+pub fn pause_queue_impl(state: &AppState) -> QueueSnapshot {
     state.orchestrator.pause_queue();
-    get_queue(state)
+    get_queue_impl(state)
 }
 
-pub fn resume_queue(state: &AppState) -> QueueSnapshot {
+#[tauri::command]
+pub fn pause_queue(state: tauri::State<'_, AppState>) -> QueueSnapshot {
+    pause_queue_impl(&state)
+}
+
+pub fn resume_queue_impl(state: &AppState) -> QueueSnapshot {
     state.orchestrator.resume_queue();
-    get_queue(state)
+    get_queue_impl(state)
 }
 
-pub fn get_queue(state: &AppState) -> QueueSnapshot {
+#[tauri::command]
+pub fn resume_queue(state: tauri::State<'_, AppState>) -> QueueSnapshot {
+    resume_queue_impl(&state)
+}
+
+pub fn get_queue_impl(state: &AppState) -> QueueSnapshot {
     QueueSnapshot {
         paused: state.orchestrator.is_paused(),
         active_job_id: None,
@@ -248,7 +282,12 @@ pub fn get_queue(state: &AppState) -> QueueSnapshot {
     }
 }
 
-pub fn get_job(state: &AppState, job_id: &str) -> Result<JobSnapshot, ApiError> {
+#[tauri::command]
+pub fn get_queue(state: tauri::State<'_, AppState>) -> QueueSnapshot {
+    get_queue_impl(&state)
+}
+
+pub fn get_job_impl(state: &AppState, job_id: &str) -> Result<JobSnapshot, ApiError> {
     let record = state
         .orchestrator
         .db
@@ -269,12 +308,27 @@ pub fn get_job(state: &AppState, job_id: &str) -> Result<JobSnapshot, ApiError> 
     Ok(job_record_to_snapshot(record))
 }
 
-pub fn load_settings(state: &AppState) -> AppSettings {
+#[tauri::command]
+pub fn get_job(state: tauri::State<'_, AppState>, job_id: String) -> Result<JobSnapshot, ApiError> {
+    get_job_impl(&state, &job_id)
+}
+
+pub fn load_settings_impl(state: &AppState) -> AppSettings {
     state.settings.lock().unwrap().clone()
 }
 
-pub fn save_settings(state: &AppState, new_settings: AppSettings) -> AppSettings {
+#[tauri::command]
+pub fn load_settings(state: tauri::State<'_, AppState>) -> AppSettings {
+    load_settings_impl(&state)
+}
+
+pub fn save_settings_impl(state: &AppState, new_settings: AppSettings) -> AppSettings {
     let mut s = state.settings.lock().unwrap();
     *s = new_settings.clone();
     new_settings
+}
+
+#[tauri::command]
+pub fn save_settings(state: tauri::State<'_, AppState>, new_settings: AppSettings) -> AppSettings {
+    save_settings_impl(&state, new_settings)
 }
