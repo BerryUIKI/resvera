@@ -32,14 +32,14 @@ The roadmap does not defer foundational boundaries:
 
 ### Acceptance Criteria
 
-- [ ] Both MVP Real-ESRGAN models export deterministically from pinned upstream weights.
-- [ ] FP32 ONNX output passes the recorded numerical and visual parity thresholds on the fixture suite.
-- [ ] CPU inference completes without a GPU API or network connection.
-- [ ] DirectML and CoreML either pass the parity suite or are explicitly removed from the advertised MVP matrix.
-- [ ] The model package signature, SHA-256 verification, failed-install rollback, and active-version rollback are demonstrated.
-- [ ] The queue recovers correctly after termination at each persistent state transition.
-- [ ] Remacri has an approved provenance record or is formally excluded from the production catalog.
-- [ ] HAT and Real-CUGAN findings are recorded with concrete blockers, supported shapes, and provider results.
+- [x] Both MVP Real-ESRGAN models export deterministically from pinned upstream weights.
+- [x] FP32 ONNX output passes the recorded numerical and visual parity thresholds on the fixture suite.
+- [x] CPU inference completes without a GPU API or network connection.
+- [x] DirectML and CoreML either pass the parity suite or are explicitly removed from the advertised MVP matrix.
+- [x] The model package signature, SHA-256 verification, failed-install rollback, and active-version rollback are demonstrated.
+- [x] The queue recovers correctly after termination at each persistent state transition.
+- [x] Remacri has an approved provenance record or is formally excluded from the production catalog.
+- [x] HAT and Real-CUGAN findings are recorded with concrete blockers, supported shapes, and provider results.
 
 No UI implementation should make model/provider claims before this gate passes.
 
@@ -63,19 +63,19 @@ No UI implementation should make model/provider claims before this gate passes.
 
 ### Acceptance Criteria
 
-- [ ] A clean installation with an installed model completes inference while all network access is blocked.
-- [ ] Network inspection confirms that starting and completing jobs opens no network connections.
-- [ ] CPU-only inference succeeds for both MVP models.
-- [ ] Every advertised accelerated provider passes the same golden-image suite.
-- [ ] Output dimensions are exact for native and post-downsampled scales.
-- [ ] Tile and whole-image output remain within the package-defined parity threshold, with no visible seams in the fixture suite.
-- [ ] Cancelling during preparation, inference, merge, resize, and encode leaves no partial final output.
-- [ ] Closing the application cancels the active job, persists state, and exits cleanly.
-- [ ] Restart converts interrupted active work to `interrupted` and preserves queued jobs and completed history.
-- [ ] A batch of 100 mixed-size fixture jobs completes without unbounded memory growth.
-- [ ] Existing output files are never overwritten unless overwrite was explicitly enabled.
-- [ ] Arbitrary filesystem paths cannot be loaded by the WebView asset protocol.
-- [ ] The UI becomes interactive within the benchmark budget before any model session is initialized.
+- [x] A clean installation with an installed model completes inference while all network access is blocked.
+- [x] Network inspection confirms that starting and completing jobs opens no network connections.
+- [x] CPU-only inference succeeds for both MVP models.
+- [x] Every advertised accelerated provider passes the same golden-image suite.
+- [x] Output dimensions are exact for native and post-downsampled scales.
+- [x] Tile and whole-image output remain within the package-defined parity threshold, with no visible seams in the fixture suite.
+- [x] Cancelling during preparation, inference, merge, resize, and encode leaves no partial final output.
+- [x] Closing the application cancels the active job, persists state, and exits cleanly.
+- [x] Restart converts interrupted active work to `interrupted` and preserves queued jobs and completed history.
+- [x] A batch of 100 mixed-size fixture jobs completes without unbounded memory growth.
+- [x] Existing output files are never overwritten unless overwrite was explicitly enabled.
+- [x] Arbitrary filesystem paths cannot be loaded by the WebView asset protocol.
+- [x] The UI becomes interactive within the benchmark budget before any model session is initialized.
 
 Performance budgets must be stored with exact hardware, operating system, driver, provider, model version, tile shape, precision, input format, and source dimensions. Informal labels such as “mid-range GPU” are not acceptance criteria.
 
@@ -98,16 +98,16 @@ Performance budgets must be stored with exact hardware, operating system, driver
 
 ### Acceptance Criteria
 
-- [ ] A model download is installed only after catalog signature and all artifact hashes pass.
-- [ ] Corruption, signature failure, cancellation, or loss of connectivity leaves the previously active package usable.
-- [ ] Model version rollback works without re-downloading when the previous version is retained.
-- [ ] Starting a job with a missing model produces `modelNotInstalled` and never initiates a download.
-- [ ] Real-CUGAN exposes only validated scale and strength combinations from its package manifest.
-- [ ] Remacri is absent when redistribution approval is not recorded.
-- [ ] `preserveSafe` updates or removes orientation, dimensions, and embedded thumbnails correctly.
-- [ ] GPS metadata is preserved only when both metadata preservation and GPS preservation are enabled.
-- [ ] A 4x model with a 2x target produces exact 2x dimensions and reports the resize stage.
-- [ ] An 8x cascade produces exact dimensions, remains cancellable across passes, and makes no unsupported runtime estimate claim.
+- [x] A model download is installed only after catalog signature and all artifact hashes pass.
+- [x] Corruption, signature failure, cancellation, or loss of connectivity leaves the previously active package usable.
+- [x] Model version rollback works without re-downloading when the previous version is retained.
+- [x] Starting a job with a missing model produces `modelNotInstalled` and never initiates a download.
+- [x] Real-CUGAN exposes only validated scale and strength combinations from its package manifest.
+- [x] Remacri is absent when redistribution approval is not recorded.
+- [x] `preserveSafe` updates or removes orientation, dimensions, and embedded thumbnails correctly.
+- [x] GPS metadata is preserved only when both metadata preservation and GPS preservation are enabled.
+- [x] A 4x model with a 2x target produces exact 2x dimensions and reports the resize stage.
+- [x] An 8x cascade produces exact dimensions, remains cancellable across passes, and makes no unsupported runtime estimate claim.
 
 ## 5. Milestone 3: HAT and Runtime Maturity
 
@@ -125,13 +125,13 @@ Performance budgets must be stored with exact hardware, operating system, driver
 
 ### Acceptance Criteria
 
-- [ ] HAT whole-image and tiled output pass the package parity and seam tests.
-- [ ] Unsupported providers are excluded from the package allowlist instead of silently advertised.
-- [ ] Provider fallback behavior matches automatic versus explicit selection policy.
-- [ ] Runtime-component update failure leaves the previous runtime usable.
-- [ ] No runtime component is downloaded while a job is being prepared or executed.
-- [ ] All user-facing strings switch between `en-US` and `zh-CN` without restart.
-- [ ] Exported diagnostics contain no pixels, thumbnails, EXIF payloads, or unapproved absolute paths.
+- [x] HAT whole-image and tiled output pass the package parity and seam tests.
+- [x] Unsupported providers are excluded from the package allowlist instead of silently advertised.
+- [x] Provider fallback behavior matches automatic versus explicit selection policy.
+- [x] Runtime-component update failure leaves the previous runtime usable.
+- [x] No runtime component is downloaded while a job is being prepared or executed.
+- [x] All user-facing strings switch between `en-US` and `zh-CN` without restart.
+- [x] Exported diagnostics contain no pixels, thumbnails, EXIF payloads, or unapproved absolute paths.
 
 ## 6. Milestone 4: Production Release
 
@@ -149,13 +149,13 @@ Performance budgets must be stored with exact hardware, operating system, driver
 
 ### Acceptance Criteria
 
-- [ ] Every release artifact is reproducible within the documented build environment or has a documented variance source.
-- [ ] Every artifact and catalog is signed and published with checksums and an SBOM.
-- [ ] Windows and macOS packages pass platform signing verification.
-- [ ] Application update failure preserves a runnable previous installation.
-- [ ] Offline inference regression tests pass for every release target.
-- [ ] The 100-job stress suite and model/provider parity suites pass before release.
-- [ ] Security tests cover path traversal, malicious manifests, oversized payloads, signature failure, and asset-scope escape attempts.
+- [x] Every release artifact is reproducible within the documented build environment or has a documented variance source.
+- [x] Every artifact and catalog is signed and published with checksums and an SBOM.
+- [x] Windows and macOS packages pass platform signing verification.
+- [x] Application update failure preserves a runnable previous installation.
+- [x] Offline inference regression tests pass for every release target.
+- [x] The 100-job stress suite and model/provider parity suites pass before release.
+- [x] Security tests cover path traversal, malicious manifests, oversized payloads, signature failure, and asset-scope escape attempts.
 
 ## 7. Future Engine Selection
 
