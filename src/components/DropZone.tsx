@@ -43,65 +43,71 @@ export const DropZone: Component<DropZoneProps> = (props) => {
     }
   };
 
-  // Helper to generate instant test canvas images for zero-friction user testing
+  // Helper to generate instant low-res test canvas images for demonstrating dramatic 4x AI super-resolution
   const loadSampleImage = (type: "photo" | "anime") => {
     const canvas = document.createElement("canvas");
-    canvas.width = 256;
-    canvas.height = 256;
+    canvas.width = 160;
+    canvas.height = 160;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     if (type === "photo") {
       // Create landscape gradient & sun
-      const grad = ctx.createLinearGradient(0, 0, 0, 256);
+      const grad = ctx.createLinearGradient(0, 0, 0, 160);
       grad.addColorStop(0, "#0284c7");
       grad.addColorStop(0.5, "#38bdf8");
       grad.addColorStop(1, "#0f172a");
       ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, 256, 256);
+      ctx.fillRect(0, 0, 160, 160);
+
+      // Sun
+      ctx.fillStyle = "#fde047";
+      ctx.beginPath();
+      ctx.arc(120, 45, 18, 0, Math.PI * 2);
+      ctx.fill();
 
       // Mountains
       ctx.fillStyle = "#1e293b";
       ctx.beginPath();
-      ctx.moveTo(0, 256);
-      ctx.lineTo(80, 140);
-      ctx.lineTo(160, 256);
+      ctx.moveTo(0, 160);
+      ctx.lineTo(50, 85);
+      ctx.lineTo(100, 160);
       ctx.fill();
 
       ctx.fillStyle = "#334155";
       ctx.beginPath();
-      ctx.moveTo(100, 256);
-      ctx.lineTo(190, 110);
-      ctx.lineTo(256, 256);
+      ctx.moveTo(60, 160);
+      ctx.lineTo(120, 65);
+      ctx.lineTo(160, 160);
       ctx.fill();
 
-      // Text label
+      // Detailed text
       ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 16px sans-serif";
-      ctx.fillText("Resvera Photo Demo", 40, 60);
+      ctx.font = "bold 11px sans-serif";
+      ctx.fillText("Resvera Photo Demo", 18, 35);
     } else {
       // Create vibrant anime gradient & character circle
-      const grad = ctx.createLinearGradient(0, 0, 256, 256);
+      const grad = ctx.createLinearGradient(0, 0, 160, 160);
       grad.addColorStop(0, "#ec4899");
       grad.addColorStop(0.5, "#8b5cf6");
       grad.addColorStop(1, "#3b82f6");
       ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, 256, 256);
+      ctx.fillRect(0, 0, 160, 160);
 
       // Anime character badge
       ctx.fillStyle = "#ffffff";
       ctx.beginPath();
-      ctx.arc(128, 120, 50, 0, Math.PI * 2);
+      ctx.arc(80, 75, 32, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = "#ec4899";
-      ctx.font = "bold 28px sans-serif";
+      ctx.font = "bold 20px sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText("🎨", 128, 130);
+      ctx.fillText("🎨", 80, 82);
 
       ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 16px sans-serif";
-      ctx.fillText("Resvera Anime Demo", 128, 210);
+      ctx.font = "bold 11px sans-serif";
+      ctx.fillText("Resvera Anime Demo", 80, 135);
     }
 
     canvas.toBlob((blob) => {
@@ -169,14 +175,14 @@ export const DropZone: Component<DropZoneProps> = (props) => {
         <div class="flex items-center space-x-3">
           <button
             onClick={() => loadSampleImage("photo")}
-            class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs flex items-center space-x-2 transition"
+            class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs flex items-center space-x-2 transition shadow-sm"
           >
             <span>📸</span>
             <span>Landscape Photo Demo</span>
           </button>
           <button
             onClick={() => loadSampleImage("anime")}
-            class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs flex items-center space-x-2 transition"
+            class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs flex items-center space-x-2 transition shadow-sm"
           >
             <span>🎨</span>
             <span>Anime Illustration Demo</span>

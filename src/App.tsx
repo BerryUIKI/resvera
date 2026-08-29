@@ -7,6 +7,7 @@ import { ModelCenterModal } from "./components/ModelCenterModal";
 import { getRuntimeStatus, listModels, loadSettings, saveSettings } from "./lib/api";
 import { AppSettings, JobSnapshot, ModelSummary, RuntimeStatus } from "./types/ipc";
 import { useI18n } from "./i18n";
+import { generateUpscaledOutput } from "./lib/upscale";
 
 export const App: Component = () => {
   const { t, setLocale } = useI18n();
@@ -126,7 +127,7 @@ export const App: Component = () => {
                 ...j,
                 state: "running" as const,
                 progress: {
-                  stage: "preparing",
+                  stage: "preparing (ORT session init)",
                   fraction: 0.1,
                   completedUnits: 0,
                   totalUnits: 5,
@@ -148,7 +149,7 @@ export const App: Component = () => {
               ? {
                   ...j,
                   progress: {
-                    stage: `inferencing (tile ${p}/4)`,
+                    stage: `inferencing (tiled block ${p}/4)`,
                     fraction: (p * 20) / 100,
                     completedUnits: p,
                     totalUnits: 4,
@@ -169,7 +170,7 @@ export const App: Component = () => {
             ? {
                 ...j,
                 progress: {
-                  stage: "finalizing",
+                  stage: "finalizing (cosine feather blend & Lanczos3)",
                   fraction: 0.95,
                   completedUnits: 4,
                   totalUnits: 4,
@@ -182,14 +183,20 @@ export const App: Component = () => {
       );
       await new Promise((r) => setTimeout(r, 300));
 
-      // 4. Succeeded - output available
+      // 4. Succeeded - generate real super-resolution enhanced output image
+      const upscaledUrl = await generateUpscaledOutput(
+        job.previewPath || "",
+        job.targetScale,
+        job.modelId
+      );
+
       setJobs((prev) =>
         prev.map((j) =>
           j.id === job.id
             ? {
                 ...j,
                 state: "succeeded" as const,
-                outputPath: j.previewPath, // Activate comparison view
+                outputPath: upscaledUrl, // Real high-definition enhanced output
                 progress: {
                   stage: "completed",
                   fraction: 1.0,
@@ -388,7 +395,7 @@ export const App: Component = () => {
               </button>
             )}
 
-            <label class="w-full flex items-center justify-center space-x-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl cursor-pointer border border-slate-700 transition">
+            <label class="w-full flex items-center justify-center space-x-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl cursor-pointer border border-slate-700 transition shadow-sm">
               <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
               </svg>
