@@ -1,4 +1,4 @@
-import { Component, For } from "solid-js";
+import { Component, For, Show } from "solid-js";
 import { JobSnapshot } from "../types/ipc";
 import { useI18n } from "../i18n";
 
@@ -40,7 +40,7 @@ export const QueueList: Component<QueueListProps> = (props) => {
         </h2>
         <button
           onClick={props.onTogglePause}
-          class="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+          class="text-xs px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
         >
           {props.isPaused ? t("queue.resume") : t("queue.pause")}
         </button>
@@ -86,11 +86,11 @@ export const QueueList: Component<QueueListProps> = (props) => {
           )}
         </For>
 
-        {props.jobs.length === 0 && (
+        <Show when={props.jobs.length === 0}>
           <div class="p-8 text-center text-xs text-slate-500">
             {t("queue.empty")}
           </div>
-        )}
+        </Show>
       </div>
     </div>
   );
