@@ -709,6 +709,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "resvera-engine-ort"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "resvera-core",
+ "resvera-models",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "resvera-models"
 version = "0.1.0"
 dependencies = [

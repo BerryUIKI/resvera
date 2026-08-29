@@ -1,0 +1,18 @@
+[package]
+name = "resvera-engine-ort"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+resvera-core = { path = "../resvera-core" }
+resvera-models = { path = "../resvera-models" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+image = { workspace = true }
