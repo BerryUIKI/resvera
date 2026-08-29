@@ -1,0 +1,21 @@
+[package]
+name = "resvera-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+resvera-models = { path = "../resvera-models" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+image = { workspace = true }
+fast_image_resize = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+
+[dev-dependencies]
+tempfile = { workspace = true }
