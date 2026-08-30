@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
@@ -79,7 +80,14 @@ pub struct OwnedTensor {
 
 impl OwnedTensor {
     pub fn new(shape: [usize; 4], data: Vec<f32>) -> Result<Self, EngineError> {
-        let expected_len = shape[0] * shape[1] * shape[2] * shape[3];
+        let expected_len = shape.iter().try_fold(1usize, |total, dimension| {
+            total.checked_mul(*dimension).ok_or_else(|| {
+                EngineError::InvalidTensor(format!(
+                    "Tensor shape {:?} exceeds addressable memory",
+                    shape
+                ))
+            })
+        })?;
         if data.len() != expected_len {
             return Err(EngineError::InvalidTensor(format!(
                 "Data length {} does not match shape {:?} (expected {})",
@@ -99,16 +107,21 @@ impl OwnedTensor {
     }
 }
 
-pub trait ModelSession: Send + Sync {
+pub trait ModelSession: Any + Send + Sync {
     fn input_shape(&self) -> Option<[usize; 4]>;
     fn output_shape(&self) -> Option<[usize; 4]>;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 pub trait InferenceEngine: Send + Sync {
     fn id(&self) -> EngineId;
     fn capabilities(&self) -> EngineCapabilities;
     fn probe(&self) -> Result<EngineHealth, EngineError>;
-    fn load(&self, model_bytes: &[u8], provider_preference: Option<&str>) -> Result<Box<dyn ModelSession>, EngineError>;
+    fn load(
+        &self,
+        model_bytes: &[u8],
+        provider_preference: Option<&str>,
+    ) -> Result<Box<dyn ModelSession>, EngineError>;
     fn run(
         &self,
         session: &mut dyn ModelSession,
