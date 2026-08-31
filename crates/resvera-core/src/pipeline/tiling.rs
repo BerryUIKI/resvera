@@ -1,4 +1,7 @@
+use crate::adapter::PipelineError;
 use image::RgbImage;
+
+const MAX_BLEND_BUFFER_BYTES: usize = 512 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TileRect {
@@ -20,7 +23,7 @@ pub struct TilePlan {
 impl TilePlan {
     pub fn build(img_width: u32, img_height: u32, tile_size: u32, overlap: u32) -> Self {
         let mut tiles = Vec::new();
-        let step = (tile_size - overlap).max(1);
+        let step = tile_size.saturating_sub(overlap).max(1);
 
         let mut y = 0;
         while y < img_height {
@@ -78,20 +81,52 @@ pub struct TileBlender {
 }
 
 impl TileBlender {
+    /// Compatibility constructor for callers that cannot yet propagate allocation failures.
+    /// New production code should use [`Self::try_new`].
     pub fn new(img_width: u32, img_height: u32, scale: u32) -> Self {
-        let out_width = img_width * scale;
-        let out_height = img_height * scale;
-        let size = (out_width * out_height) as usize;
+        Self::try_new(img_width, img_height, scale)
+            .expect("blend buffer dimensions must fit within the configured safety limit")
+    }
 
-        Self {
+    pub fn try_new(img_width: u32, img_height: u32, scale: u32) -> Result<Self, PipelineError> {
+        let out_width = img_width
+            .checked_mul(scale)
+            .ok_or_else(|| PipelineError::Validation("Upscaled output width overflowed".into()))?;
+        let out_height = img_height
+            .checked_mul(scale)
+            .ok_or_else(|| PipelineError::Validation("Upscaled output height overflowed".into()))?;
+        let size = (out_width as usize)
+            .checked_mul(out_height as usize)
+            .ok_or_else(|| PipelineError::Validation("Upscaled pixel count overflowed".into()))?;
+        let buffer_bytes = size
+            .checked_mul(std::mem::size_of::<f32>())
+            .and_then(|bytes| bytes.checked_mul(4))
+            .ok_or_else(|| PipelineError::Validation("Blend buffer size overflowed".into()))?;
+        if buffer_bytes > MAX_BLEND_BUFFER_BYTES {
+            return Err(PipelineError::Validation(format!(
+                "Blend buffer would require {buffer_bytes} bytes, exceeding the {} byte safety limit; use a smaller image or target scale",
+                MAX_BLEND_BUFFER_BYTES
+            )));
+        }
+
+        let make_buffer = || -> Result<Vec<f32>, PipelineError> {
+            let mut buffer = Vec::new();
+            buffer.try_reserve_exact(size).map_err(|error| {
+                PipelineError::Validation(format!("Unable to allocate blend buffer: {error}"))
+            })?;
+            buffer.resize(size, 0.0);
+            Ok(buffer)
+        };
+
+        Ok(Self {
             out_width,
             out_height,
             scale,
-            accum_r: vec![0.0; size],
-            accum_g: vec![0.0; size],
-            accum_b: vec![0.0; size],
-            weights: vec![0.0; size],
-        }
+            accum_r: make_buffer()?,
+            accum_g: make_buffer()?,
+            accum_b: make_buffer()?,
+            weights: make_buffer()?,
+        })
     }
 
     /// Blends an upscaled output tile into the composite canvas with 2D feathering weights.
@@ -133,7 +168,7 @@ impl TileBlender {
 
                 let w = (wx * wy).max(1e-4);
                 let pixel = output_tile.get_pixel(tx, ty);
-                let idx = (cy * self.out_width + cx) as usize;
+                let idx = (cy as usize) * (self.out_width as usize) + (cx as usize);
 
                 self.accum_r[idx] += pixel[0] as f32 * w;
                 self.accum_g[idx] += pixel[1] as f32 * w;
@@ -149,7 +184,7 @@ impl TileBlender {
 
         for y in 0..self.out_height {
             for x in 0..self.out_width {
-                let idx = (y * self.out_width + x) as usize;
+                let idx = (y as usize) * (self.out_width as usize) + (x as usize);
                 let w = self.weights[idx].max(1e-6);
 
                 let r = (self.accum_r[idx] / w).clamp(0.0, 255.0).round() as u8;

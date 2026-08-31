@@ -3,7 +3,6 @@ use resvera_core::{
     format_output_filename, CancellationToken, CascadePipeline, CuganAdapter, MetadataPolicy,
     RrdbAdapter, SanitizedMetadata,
 };
-use resvera_engine_ort::OrtEngine;
 use std::sync::Arc;
 
 #[test]
@@ -50,7 +49,7 @@ fn test_output_filename_templating() {
 
 #[test]
 fn test_8x_cascade_upscale_pipeline() {
-    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let engine = Arc::new(MockEngine);
     let cascade = CascadePipeline::new(engine);
 
     let mut img = RgbImage::new(16, 16);
@@ -66,12 +65,31 @@ fn test_8x_cascade_upscale_pipeline() {
 
     // Run 8x cascade (16x16 -> 128x128)
     let out = cascade
-        .run_8x_cascade(&img, &adapter1, &adapter2, 8, &cancel)
+        .run_8x_cascade_with_weights(
+            &img,
+            &adapter1,
+            b"verified-4x-model",
+            &adapter2,
+            b"verified-2x-model",
+            8,
+            &cancel,
+        )
         .unwrap();
     assert_eq!(out.dimensions(), (128, 128));
 
     // Test cancellation
     cancel.cancel();
-    let err = cascade.run_8x_cascade(&img, &adapter1, &adapter2, 8, &cancel);
+    let err = cascade.run_8x_cascade_with_weights(
+        &img,
+        &adapter1,
+        b"verified-4x-model",
+        &adapter2,
+        b"verified-2x-model",
+        8,
+        &cancel,
+    );
     assert!(err.is_err());
 }
+mod common;
+
+use common::MockEngine;

@@ -41,12 +41,16 @@ fn test_tiling_and_seamless_blending() {
     let mut img = RgbImage::new(width, height);
     for y in 0..height {
         for x in 0..width {
-            img.put_pixel(x, y, Rgb([(x * 3) as u8, (y * 3) as u8, ((x + y) * 2) as u8]));
+            img.put_pixel(
+                x,
+                y,
+                Rgb([(x * 3) as u8, (y * 3) as u8, ((x + y) * 2) as u8]),
+            );
         }
     }
 
     let plan = TilePlan::build(width, height, 32, 8);
-    let mut blender = TileBlender::new(width, height, scale);
+    let mut blender = TileBlender::try_new(width, height, scale).unwrap();
 
     for tile in &plan.tiles {
         // Create an exact 4x nearest upscale for testing the blender
@@ -95,7 +99,14 @@ fn test_collision_safe_naming_and_atomic_save() {
     let out_dir = temp.path();
     let input_path = std::path::PathBuf::from("/test/photo.jpg");
 
-    let p1 = generate_output_path(out_dir, &input_path, "realesrgan", 4, &OutputFormat::Png, false);
+    let p1 = generate_output_path(
+        out_dir,
+        &input_path,
+        "realesrgan",
+        4,
+        &OutputFormat::Png,
+        false,
+    );
     assert_eq!(p1.file_name().unwrap(), "photo_realesrgan_4x.png");
 
     let img = RgbImage::new(10, 10);
@@ -103,10 +114,24 @@ fn test_collision_safe_naming_and_atomic_save() {
     assert!(p1.exists());
 
     // Without overwrite, generating output path should produce _1 suffix
-    let p2 = generate_output_path(out_dir, &input_path, "realesrgan", 4, &OutputFormat::Png, false);
+    let p2 = generate_output_path(
+        out_dir,
+        &input_path,
+        "realesrgan",
+        4,
+        &OutputFormat::Png,
+        false,
+    );
     assert_eq!(p2.file_name().unwrap(), "photo_realesrgan_4x_1.png");
 
     // With overwrite, should produce original path
-    let p3 = generate_output_path(out_dir, &input_path, "realesrgan", 4, &OutputFormat::Png, true);
+    let p3 = generate_output_path(
+        out_dir,
+        &input_path,
+        "realesrgan",
+        4,
+        &OutputFormat::Png,
+        true,
+    );
     assert_eq!(p3.file_name().unwrap(), "photo_realesrgan_4x.png");
 }
