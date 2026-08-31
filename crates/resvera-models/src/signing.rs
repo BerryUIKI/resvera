@@ -1,7 +1,7 @@
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 use std::fs::File;
-use std::io::{Read, self};
+use std::io::{self, Read};
 use std::path::Path;
 use thiserror::Error;
 
@@ -68,7 +68,9 @@ pub fn verify_signature_hex(
     let sig_vec = hex::decode(signature_hex)
         .map_err(|e| SigningError::InvalidSignatureBytes(e.to_string()))?;
     if sig_vec.len() != 64 {
-        return Err(SigningError::InvalidSignatureBytes("Signature must be 64 bytes".into()));
+        return Err(SigningError::InvalidSignatureBytes(
+            "Signature must be 64 bytes".into(),
+        ));
     }
     let mut sig_arr = [0u8; 64];
     sig_arr.copy_from_slice(&sig_vec);

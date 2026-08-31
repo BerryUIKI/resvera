@@ -40,7 +40,43 @@ impl StagedDownloader {
         entry: &ModelCatalogEntry,
         data_chunks: &[&[u8]],
         manifest_json: &str,
+        public_key: &[u8; 32],
     ) -> Result<PathBuf, DownloadError> {
+        crate::validate_path_component(&entry.id, "entry.id")
+            .map_err(DownloadError::SignatureInvalid)?;
+        crate::validate_path_component(&entry.version, "entry.version")
+            .map_err(DownloadError::SignatureInvalid)?;
+        entry
+            .verify(public_key)
+            .map_err(|error| DownloadError::SignatureInvalid(error.to_string()))?;
+
+        let manifest_hash = format!("{:x}", Sha256::digest(manifest_json.as_bytes()));
+        if !manifest_hash.eq_ignore_ascii_case(&entry.manifest_sha256) {
+            return Err(DownloadError::SignatureInvalid(
+                "Package manifest digest does not match the signed catalog entry".into(),
+            ));
+        }
+        let manifest: crate::ModelManifest = serde_json::from_str(manifest_json)
+            .map_err(|error| DownloadError::SignatureInvalid(error.to_string()))?;
+        manifest
+            .validate()
+            .map_err(|error| DownloadError::SignatureInvalid(error.to_string()))?;
+        if manifest.id != entry.id || manifest.package_version != entry.version {
+            return Err(DownloadError::SignatureInvalid(
+                "Manifest identity does not match the signed catalog entry".into(),
+            ));
+        }
+        let matching_artifact = manifest.artifacts.iter().find(|artifact| {
+            artifact.path == "artifacts/model.onnx"
+                && artifact.size_bytes == entry.size_bytes
+                && artifact.sha256.eq_ignore_ascii_case(&entry.sha256)
+        });
+        if manifest.artifacts.len() != 1 || matching_artifact.is_none() {
+            return Err(DownloadError::SignatureInvalid(
+                "Manifest artifact contract does not match the signed catalog entry".into(),
+            ));
+        }
+
         let staged_root = self.base_dir.join(".staged");
         let stage_dir = staged_root.join(&entry.id).join(&entry.version);
         let artifacts_dir = stage_dir.join("artifacts");
@@ -58,11 +94,14 @@ impl StagedDownloader {
         drop(file);
 
         let calculated_hash = format!("{:x}", hasher.finalize());
-        if calculated_hash != entry.sha256 {
-            let _ = fs::remove_dir_all(&staged_root);
+        let calculated_size = fs::metadata(&artifact_path)?.len();
+        if calculated_size != entry.size_bytes
+            || !calculated_hash.eq_ignore_ascii_case(&entry.sha256)
+        {
+            self.cleanup_stage_dir(&entry.id, &entry.version);
             return Err(DownloadError::HashMismatch {
-                expected: entry.sha256.clone(),
-                calculated: calculated_hash,
+                expected: format!("{} ({} bytes)", entry.sha256, entry.size_bytes),
+                calculated: format!("{} ({} bytes)", calculated_hash, calculated_size),
             });
         }
 
@@ -75,14 +114,26 @@ impl StagedDownloader {
         let manifest = match installer.install_package(&stage_dir) {
             Ok(m) => m,
             Err(e) => {
-                let _ = fs::remove_dir_all(&staged_root);
+                self.cleanup_stage_dir(&entry.id, &entry.version);
                 return Err(DownloadError::Install(e));
             }
         };
 
-        let _ = fs::remove_dir_all(&staged_root);
+        self.cleanup_stage_dir(&entry.id, &entry.version);
 
-        let installed_dir = self.base_dir.join(&manifest.id).join(&manifest.package_version);
+        let installed_dir = self
+            .base_dir
+            .join(&manifest.id)
+            .join(&manifest.package_version);
         Ok(installed_dir)
+    }
+
+    fn cleanup_stage_dir(&self, entry_id: &str, entry_version: &str) {
+        let staged_root = self.base_dir.join(".staged");
+        let model_dir = staged_root.join(entry_id);
+        let stage_dir = model_dir.join(entry_version);
+        let _ = fs::remove_dir_all(&stage_dir);
+        let _ = fs::remove_dir(&model_dir);
+        let _ = fs::remove_dir(&staged_root);
     }
 }

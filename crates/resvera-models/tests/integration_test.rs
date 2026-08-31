@@ -8,7 +8,13 @@ use resvera_models::{
 use std::fs;
 use tempfile::tempdir;
 
-fn sample_manifest(id: &str, version: &str, artifact_name: &str, hash: &str) -> ModelManifest {
+fn sample_manifest(
+    id: &str,
+    version: &str,
+    artifact_name: &str,
+    size_bytes: u64,
+    hash: &str,
+) -> ModelManifest {
     ModelManifest {
         schema_version: 1,
         id: id.into(),
@@ -60,7 +66,7 @@ fn sample_manifest(id: &str, version: &str, artifact_name: &str, hash: &str) -> 
         },
         artifacts: vec![ArtifactEntry {
             path: format!("artifacts/{}", artifact_name),
-            size_bytes: 32,
+            size_bytes,
             sha256: hash.into(),
         }],
     }
@@ -79,7 +85,8 @@ fn test_ed25519_catalog_signature_workflow() {
     assert!(verify_signature(&verifying_key_bytes, catalog_payload, &signature).is_ok());
 
     // 2. Tampered payload
-    let tampered_payload = b"{\"schema_version\":1,\"models\":[\"realesrgan-x4plus\",\"malicious-model\"]}";
+    let tampered_payload =
+        b"{\"schema_version\":1,\"models\":[\"realesrgan-x4plus\",\"malicious-model\"]}";
     assert!(matches!(
         verify_signature(&verifying_key_bytes, tampered_payload, &signature),
         Err(SigningError::VerificationFailed)
@@ -99,7 +106,13 @@ fn test_package_installation_and_atomic_rollback() {
     fs::write(&art1, b"realesrgan model weights v1.0.0").unwrap();
     let hash1 = compute_file_sha256(&art1).unwrap();
 
-    let manifest1 = sample_manifest("realesrgan-x4plus", "1.0.0", "model.onnx", &hash1);
+    let manifest1 = sample_manifest(
+        "realesrgan-x4plus",
+        "1.0.0",
+        "model.onnx",
+        fs::metadata(&art1).unwrap().len(),
+        &hash1,
+    );
     fs::write(
         stage1.path().join("manifest.json"),
         serde_json::to_string_pretty(&manifest1).unwrap(),
@@ -121,7 +134,13 @@ fn test_package_installation_and_atomic_rollback() {
     fs::write(&art2, b"realesrgan model weights v1.1.0 upgraded").unwrap();
     let hash2 = compute_file_sha256(&art2).unwrap();
 
-    let manifest2 = sample_manifest("realesrgan-x4plus", "1.1.0", "model.onnx", &hash2);
+    let manifest2 = sample_manifest(
+        "realesrgan-x4plus",
+        "1.1.0",
+        "model.onnx",
+        fs::metadata(&art2).unwrap().len(),
+        &hash2,
+    );
     fs::write(
         stage2.path().join("manifest.json"),
         serde_json::to_string_pretty(&manifest2).unwrap(),

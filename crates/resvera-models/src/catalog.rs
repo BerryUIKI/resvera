@@ -13,6 +13,7 @@ pub struct ModelCatalogEntry {
     pub redistribution_review: String,
     pub size_bytes: u64,
     pub sha256: String,
+    pub manifest_sha256: String,
     pub download_urls: Vec<String>,
     pub signature: String,
 }
@@ -37,5 +38,17 @@ impl ModelCatalog {
     pub fn verify(&self, public_key: &[u8; 32]) -> Result<(), SigningError> {
         let payload = self.signing_payload();
         verify_signature_hex(public_key, &payload, &self.signature)
+    }
+}
+
+impl ModelCatalogEntry {
+    pub fn signing_payload(&self) -> Vec<u8> {
+        let mut cloned = self.clone();
+        cloned.signature.clear();
+        serde_json::to_vec(&cloned).unwrap_or_default()
+    }
+
+    pub fn verify(&self, public_key: &[u8; 32]) -> Result<(), SigningError> {
+        verify_signature_hex(public_key, &self.signing_payload(), &self.signature)
     }
 }

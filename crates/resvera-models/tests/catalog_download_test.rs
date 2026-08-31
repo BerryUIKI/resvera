@@ -28,6 +28,7 @@ fn test_catalog_signing_and_verification() {
             redistribution_review: "approved".into(),
             size_bytes: 1024,
             sha256: "abc123hash".into(),
+            manifest_sha256: "manifest-hash".into(),
             download_urls: vec!["https://models.resvera.local/realesrgan-x4plus.pkg".into()],
             signature: "dummy_sig".into(),
         }],
@@ -50,6 +51,8 @@ fn test_catalog_signing_and_verification() {
 fn test_staged_download_and_hash_enforcement() {
     let temp = tempdir().unwrap();
     let downloader = StagedDownloader::new(temp.path());
+    let signing_key = SigningKey::generate(&mut OsRng);
+    let public_key = signing_key.verifying_key().to_bytes();
 
     let fake_weights = b"simulated high quality onnx weights 123456789";
     let mut hasher = Sha256::new();
@@ -113,8 +116,9 @@ fn test_staged_download_and_hash_enforcement() {
     };
 
     let signed_manifest_json = serde_json::to_string_pretty(&manifest).unwrap();
+    let manifest_sha256 = format!("{:x}", Sha256::digest(signed_manifest_json.as_bytes()));
 
-    let entry = ModelCatalogEntry {
+    let mut entry = ModelCatalogEntry {
         id: "realesrgan-x4plus".into(),
         version: "1.0.0".into(),
         display_name: "Real-ESRGAN x4plus".into(),
@@ -125,14 +129,16 @@ fn test_staged_download_and_hash_enforcement() {
         redistribution_review: "approved".into(),
         size_bytes: fake_weights.len() as u64,
         sha256: true_sha256.clone(),
+        manifest_sha256,
         download_urls: vec!["https://local/pkg".into()],
-        signature: "sig".into(),
+        signature: String::new(),
     };
+    entry.signature = sign_payload(&entry.signing_payload(), &signing_key.to_bytes());
 
     // 1. Success case: data matches sha256
     let chunks: Vec<&[u8]> = vec![&fake_weights[0..10], &fake_weights[10..]];
     let installed_dir = downloader
-        .stage_and_install(&entry, &chunks, &signed_manifest_json)
+        .stage_and_install(&entry, &chunks, &signed_manifest_json, &public_key)
         .unwrap();
     assert!(installed_dir.exists());
 
@@ -144,8 +150,13 @@ fn test_staged_download_and_hash_enforcement() {
 
     // 2. Failure case: corrupted chunk
     let corrupt_chunks: Vec<&[u8]> = vec![b"corrupted bytes"];
-    let err = downloader.stage_and_install(&entry, &corrupt_chunks, &signed_manifest_json);
+    let err =
+        downloader.stage_and_install(&entry, &corrupt_chunks, &signed_manifest_json, &public_key);
     assert!(matches!(err, Err(DownloadError::HashMismatch { .. })));
+
+    let tampered_manifest = signed_manifest_json.replace("Official RRDB", "Tampered RRDB");
+    let err = downloader.stage_and_install(&entry, &chunks, &tampered_manifest, &public_key);
+    assert!(matches!(err, Err(DownloadError::SignatureInvalid(_))));
 
     // Ensure staging directory was wiped
     assert!(!temp.path().join(".staged").exists());

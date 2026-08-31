@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::Path;
 use thiserror::Error;
 
@@ -95,13 +96,31 @@ pub struct ArtifactEntry {
 }
 
 fn check_safe_relative_path(path_str: &str) -> Result<(), ManifestError> {
-    if path_str.contains("..")
+    let path = Path::new(path_str);
+    if path_str.trim().is_empty()
+        || path.is_absolute()
         || path_str.starts_with('/')
         || path_str.starts_with('\\')
         || (path_str.len() > 1 && path_str.chars().nth(1) == Some(':'))
         || path_str.contains('\0')
+        || path
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
     {
         return Err(ManifestError::PathTraversal(path_str.to_string()));
+    }
+    Ok(())
+}
+
+fn check_identifier(value: &str, field: &str) -> Result<(), ManifestError> {
+    if value.is_empty()
+        || !value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+        })
+    {
+        return Err(ManifestError::Validation(format!(
+            "Manifest '{field}' contains unsupported characters"
+        )));
     }
     Ok(())
 }
@@ -118,24 +137,93 @@ impl ModelManifest {
         if self.schema_version != 1 {
             return Err(ManifestError::UnsupportedSchemaVersion(self.schema_version));
         }
-        if self.id.trim().is_empty() {
-            return Err(ManifestError::Validation("Manifest 'id' cannot be empty".into()));
-        }
-        check_safe_relative_path(&self.id)?;
-        check_safe_relative_path(&self.package_version)?;
+        check_identifier(&self.id, "id")?;
+        check_identifier(&self.package_version, "package_version")?;
 
         if self.variants.is_empty() {
-            return Err(ManifestError::Validation("At least one variant must be defined".into()));
+            return Err(ManifestError::Validation(
+                "At least one variant must be defined".into(),
+            ));
         }
+        let mut variant_ids = HashSet::new();
         for variant in &self.variants {
+            check_identifier(&variant.id, "variants[].id")?;
+            if !variant_ids.insert(&variant.id) {
+                return Err(ManifestError::Validation(format!(
+                    "Duplicate variant id: {}",
+                    variant.id
+                )));
+            }
+            if variant.native_scale == 0 {
+                return Err(ManifestError::Validation(format!(
+                    "Variant '{}' has an invalid native scale of zero",
+                    variant.id
+                )));
+            }
             check_safe_relative_path(&variant.artifact)?;
         }
 
         if self.artifacts.is_empty() {
-            return Err(ManifestError::Validation("At least one artifact must be defined".into()));
+            return Err(ManifestError::Validation(
+                "At least one artifact must be defined".into(),
+            ));
         }
+        let mut artifact_paths = HashSet::new();
         for artifact in &self.artifacts {
             check_safe_relative_path(&artifact.path)?;
+            if !artifact_paths.insert(&artifact.path) {
+                return Err(ManifestError::Validation(format!(
+                    "Duplicate artifact path: {}",
+                    artifact.path
+                )));
+            }
+            if artifact.sha256.len() != 64
+                || !artifact.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err(ManifestError::Validation(format!(
+                    "Artifact '{}' has an invalid SHA-256 digest",
+                    artifact.path
+                )));
+            }
+        }
+        for variant in &self.variants {
+            if !artifact_paths.contains(&variant.artifact) {
+                return Err(ManifestError::Validation(format!(
+                    "Variant '{}' references undeclared artifact '{}'",
+                    variant.id, variant.artifact
+                )));
+            }
+        }
+
+        if !self.tensor.layout.eq_ignore_ascii_case("NCHW")
+            || !self.tensor.channels.eq_ignore_ascii_case("RGB")
+            || !self.tensor.element_type.eq_ignore_ascii_case("float32")
+        {
+            return Err(ManifestError::Validation(
+                "Only float32 RGB NCHW tensor contracts are supported".into(),
+            ));
+        }
+        if self.tensor.input_range[0] >= self.tensor.input_range[1]
+            || self.tensor.output_range[0] >= self.tensor.output_range[1]
+        {
+            return Err(ManifestError::Validation(
+                "Tensor ranges must be strictly increasing".into(),
+            ));
+        }
+        if self.tiling.minimum == 0
+            || self.tiling.recommended < self.tiling.minimum
+            || self.tiling.overlap >= self.tiling.minimum
+            || self.tiling.alignment == 0
+        {
+            return Err(ManifestError::Validation(
+                "Tiling requirements are internally inconsistent".into(),
+            ));
+        }
+        if self.compatibility.engine != "onnx-runtime" {
+            return Err(ManifestError::Validation(format!(
+                "Unsupported engine contract: {}",
+                self.compatibility.engine
+            )));
         }
 
         Ok(())
