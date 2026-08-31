@@ -1,10 +1,13 @@
-use crate::adapter::{ModelAdapter, PipelineError, RrdbAdapter};
+use crate::adapter::{
+    CuganAdapter, HatAdapter, ModelAdapter, PipelineError, RrdbAdapter, TileConstraints,
+};
 use crate::engine::{CancellationToken, EngineError, InferenceEngine};
 use crate::pipeline::atomic::{atomic_save_image, generate_output_path};
 use crate::pipeline::io::{load_image, OutputFormat};
 use crate::pipeline::resample::downsample_lanczos3;
 use crate::pipeline::tiling::{TileBlender, TilePlan};
 use image::RgbImage;
+use resvera_models::{InstallerError, ModelInstaller, ModelManifest, ResolvedModel};
 use resvera_persistence::{AppDatabase, DatabaseError, JobRecord};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -21,6 +24,8 @@ pub enum OrchestratorError {
     Pipeline(#[from] PipelineError),
     #[error("Engine error: {0}")]
     Engine(#[from] EngineError),
+    #[error("Model registry error: {0}")]
+    Model(#[from] InstallerError),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Validation error: {0}")]
@@ -67,6 +72,7 @@ pub struct JobOrchestrator {
     pub db: AppDatabase,
     pub engine: Arc<dyn InferenceEngine>,
     pub preview_cache_dir: PathBuf,
+    pub models_root: PathBuf,
     paused: Arc<AtomicBool>,
     active_job_id: Arc<Mutex<Option<String>>>,
     active_cancel_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
@@ -78,6 +84,16 @@ impl JobOrchestrator {
         engine: Arc<dyn InferenceEngine>,
         preview_cache_dir: P,
     ) -> Self {
+        let models_root = default_models_root();
+        Self::with_models_root(db, engine, preview_cache_dir, models_root)
+    }
+
+    pub fn with_models_root<P: AsRef<Path>, M: AsRef<Path>>(
+        db: AppDatabase,
+        engine: Arc<dyn InferenceEngine>,
+        preview_cache_dir: P,
+        models_root: M,
+    ) -> Self {
         let preview_cache_dir = preview_cache_dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&preview_cache_dir).ok();
 
@@ -85,6 +101,7 @@ impl JobOrchestrator {
             db,
             engine,
             preview_cache_dir,
+            models_root: models_root.as_ref().to_path_buf(),
             paused: Arc::new(AtomicBool::new(false)),
             active_job_id: Arc::new(Mutex::new(None)),
             active_cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
@@ -104,16 +121,21 @@ impl JobOrchestrator {
     }
 
     pub fn submit_job(&self, req: &UpscaleJobRequest) -> Result<JobRecord, OrchestratorError> {
-        let path = Path::new(&req.input_path);
-        if !path.exists() {
-            return Err(OrchestratorError::Validation(format!(
-                "Input file not found: {}",
-                req.input_path
-            )));
-        }
+        validate_input_file(&req.input_path)?;
+        let provider = normalize_provider(req.provider_preference.as_deref())?;
+        let resolved = self.resolve_request_model(
+            &req.model_id,
+            &req.model_variant_id,
+            req.target_scale,
+            req.tile_size,
+            &provider,
+        )?;
 
         let id = format!("job-{}", uuid::Uuid::new_v4());
         let now = chrono::Utc::now().to_rfc3339();
+        let format_json = Some(serde_json::to_string(&req.output_format).map_err(|error| {
+            OrchestratorError::Validation(format!("Could not serialize output format: {error}"))
+        })?);
 
         let record = JobRecord {
             id: id.clone(),
@@ -122,15 +144,19 @@ impl JobOrchestrator {
             output_path: None,
             preview_path: None,
             model_id: req.model_id.clone(),
-            model_package_version: "1.0.0".to_string(),
+            model_package_version: resolved.manifest.package_version,
             model_variant_id: req.model_variant_id.clone(),
             target_scale: req.target_scale,
             engine_id: self.engine.id().0,
-            provider_id: req.provider_preference.clone(),
+            provider_id: Some(provider),
             progress_fraction: 0.0,
             progress_stage: "queued".to_string(),
             error_code: None,
             error_message: None,
+            output_directory: Some(req.output_directory.clone()),
+            output_format_json: format_json,
+            overwrite: req.overwrite,
+            tile_size: req.tile_size,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -140,17 +166,29 @@ impl JobOrchestrator {
     }
 
     pub fn submit_batch(&self, req: &BatchJobRequest) -> Result<Vec<JobRecord>, OrchestratorError> {
+        if req.inputs.is_empty() {
+            return Err(OrchestratorError::Validation(
+                "Batch must contain at least one input".into(),
+            ));
+        }
+        let provider = normalize_provider(req.defaults.provider_preference.as_deref())?;
+        let resolved = self.resolve_request_model(
+            &req.defaults.model_id,
+            &req.defaults.model_variant_id,
+            req.defaults.target_scale,
+            req.defaults.tile_size,
+            &provider,
+        )?;
         let mut records = Vec::with_capacity(req.inputs.len());
         let now = chrono::Utc::now().to_rfc3339();
+        let format_json = Some(serde_json::to_string(&req.defaults.output_format).map_err(
+            |error| {
+                OrchestratorError::Validation(format!("Could not serialize output format: {error}"))
+            },
+        )?);
 
         for input in &req.inputs {
-            let path = Path::new(input);
-            if !path.exists() {
-                return Err(OrchestratorError::Validation(format!(
-                    "Input file not found: {}",
-                    input
-                )));
-            }
+            validate_input_file(input)?;
 
             let id = format!("job-{}", uuid::Uuid::new_v4());
             records.push(JobRecord {
@@ -160,15 +198,19 @@ impl JobOrchestrator {
                 output_path: None,
                 preview_path: None,
                 model_id: req.defaults.model_id.clone(),
-                model_package_version: "1.0.0".to_string(),
+                model_package_version: resolved.manifest.package_version.clone(),
                 model_variant_id: req.defaults.model_variant_id.clone(),
                 target_scale: req.defaults.target_scale,
                 engine_id: self.engine.id().0,
-                provider_id: req.defaults.provider_preference.clone(),
+                provider_id: Some(provider.clone()),
                 progress_fraction: 0.0,
                 progress_stage: "queued".to_string(),
                 error_code: None,
                 error_message: None,
+                output_directory: Some(req.defaults.output_directory.clone()),
+                output_format_json: format_json.clone(),
+                overwrite: req.defaults.overwrite,
+                tile_size: req.defaults.tile_size,
                 created_at: now.clone(),
                 updated_at: now.clone(),
             });
@@ -178,11 +220,66 @@ impl JobOrchestrator {
         Ok(records)
     }
 
+    fn resolve_request_model(
+        &self,
+        model_id: &str,
+        variant_id: &str,
+        target_scale: u32,
+        tile_size: Option<u32>,
+        provider: &str,
+    ) -> Result<ResolvedModel, OrchestratorError> {
+        let resolved =
+            ModelInstaller::new(&self.models_root).resolve_active_variant(model_id, variant_id)?;
+        let adapter = adapter_for_manifest(&resolved.manifest, resolved.variant.native_scale)?;
+        adapter.validate_manifest(&resolved.manifest)?;
+        validated_tile_size(tile_size, adapter.tile_constraints(&resolved.manifest))?;
+
+        if target_scale == 0 || target_scale > resolved.variant.native_scale {
+            return Err(OrchestratorError::Validation(format!(
+                "Target scale {target_scale}x is unsupported by variant '{}' (native {}x)",
+                resolved.variant.id, resolved.variant.native_scale
+            )));
+        }
+
+        let capabilities = self.engine.capabilities();
+        if !capabilities
+            .supported_providers
+            .iter()
+            .any(|supported| supported.eq_ignore_ascii_case(provider))
+        {
+            return Err(OrchestratorError::Validation(format!(
+                "Provider '{provider}' is not available in the active engine"
+            )));
+        }
+        if !resolved
+            .manifest
+            .compatibility
+            .validated_providers
+            .iter()
+            .any(|validated| validated.eq_ignore_ascii_case(provider))
+        {
+            return Err(OrchestratorError::Validation(format!(
+                "Provider '{provider}' has not been validated for model '{model_id}'"
+            )));
+        }
+
+        Ok(resolved)
+    }
+
     pub fn cancel_job(&self, job_id: &str) -> Result<(), OrchestratorError> {
         if let Some(token) = self.active_cancel_tokens.lock().unwrap().get(job_id) {
             token.cancel();
         }
-        self.db.update_job_state(job_id, "cancelled")?;
+        if !self.db.cancel_job(job_id)? {
+            let job = self
+                .db
+                .get_job(job_id)?
+                .ok_or_else(|| OrchestratorError::JobNotFound(job_id.to_string()))?;
+            return Err(OrchestratorError::Validation(format!(
+                "Job {job_id} cannot be cancelled from terminal state '{}'",
+                job.state
+            )));
+        }
         Ok(())
     }
 
@@ -192,8 +289,7 @@ impl JobOrchestrator {
             return Ok(None);
         }
 
-        // Find next queued job
-        let next_job = match self.find_oldest_queued_job()? {
+        let next_job = match self.db.claim_next_queued_job()? {
             Some(j) => j,
             None => return Ok(None),
         };
@@ -218,24 +314,18 @@ impl JobOrchestrator {
 
         match result {
             Ok(completed) => Ok(Some(completed)),
-            Err(OrchestratorError::Engine(EngineError::Cancelled)) | Err(OrchestratorError::Cancelled) => {
-                self.db.update_job_state(&job_id, "cancelled")?;
-                let mut updated = next_job;
-                updated.state = "cancelled".to_string();
-                Ok(Some(updated))
+            Err(OrchestratorError::Engine(EngineError::Cancelled))
+            | Err(OrchestratorError::Cancelled) => {
+                let _ = self.db.cancel_job(&job_id)?;
+                Ok(self.db.get_job(&job_id)?)
             }
             Err(e) => {
-                self.db.update_job_state(&job_id, "failed")?;
-                let mut updated = next_job;
-                updated.state = "failed".to_string();
-                updated.error_message = Some(e.to_string());
-                Ok(Some(updated))
+                let _ = self
+                    .db
+                    .update_job_failure(&job_id, "processingFailed", &e.to_string())?;
+                Ok(self.db.get_job(&job_id)?)
             }
         }
-    }
-
-    fn find_oldest_queued_job(&self) -> Result<Option<JobRecord>, OrchestratorError> {
-        Ok(self.db.get_job_by_state("queued")?)
     }
 
     fn execute_job(
@@ -245,26 +335,39 @@ impl JobOrchestrator {
     ) -> Result<JobRecord, OrchestratorError> {
         cancel.check()?;
 
-        // 1. Preparing
-        self.db.update_job_state(&job.id, "preparing")?;
         let src_img = load_image(&job.input_path)?;
         let (width, height) = src_img.dimensions();
 
-        let tile_size = 32u32;
-        let overlap = 8u32;
+        let installer = ModelInstaller::new(&self.models_root);
+        let resolved = installer.resolve_version_variant(
+            &job.model_id,
+            &job.model_package_version,
+            &job.model_variant_id,
+        )?;
+        let adapter = adapter_for_manifest(&resolved.manifest, resolved.variant.native_scale)?;
+        adapter.validate_manifest(&resolved.manifest)?;
+        let constraints = adapter.tile_constraints(&resolved.manifest);
+        let tile_size = validated_tile_size(job.tile_size, constraints)?;
+        let overlap = constraints.overlap;
         let plan = TilePlan::build(width, height, tile_size, overlap);
         let total_tiles = plan.tiles.len();
+        if total_tiles == 0 {
+            return Err(OrchestratorError::Validation(
+                "Input image produced an empty tile plan".into(),
+            ));
+        }
 
-        // 2. Load model session
-        let adapter = RrdbAdapter;
-        let mut session = self
-            .engine
-            .load(b"model_bytes", job.provider_id.as_deref())?;
+        let model_bytes = std::fs::read(&resolved.artifact_path)?;
+        let mut session = self.engine.load(&model_bytes, job.provider_id.as_deref())?;
 
-        // 3. Running inference tile by tile
-        self.db.update_job_state(&job.id, "running")?;
-        let native_scale = 4u32;
-        let mut blender = TileBlender::new(width, height, native_scale);
+        if !self
+            .db
+            .transition_job_state(&job.id, "preparing", "running")?
+        {
+            return Err(OrchestratorError::Cancelled);
+        }
+        let native_scale = resolved.variant.native_scale;
+        let mut blender = TileBlender::try_new(width, height, native_scale)?;
 
         for (idx, tile_rect) in plan.tiles.iter().enumerate() {
             cancel.check()?;
@@ -282,67 +385,226 @@ impl JobOrchestrator {
 
             let in_tensor = adapter.preprocess(&tile_img)?;
             let out_tensor = self.engine.run(&mut *session, in_tensor.view(), cancel)?;
-            let out_tile = adapter.postprocess(&out_tensor)?;
+            let mut out_tile = adapter.postprocess(&out_tensor)?;
+            let expected_width = tile_rect.width.checked_mul(native_scale).ok_or_else(|| {
+                OrchestratorError::Validation("Upscaled tile width overflowed".into())
+            })?;
+            let expected_height = tile_rect.height.checked_mul(native_scale).ok_or_else(|| {
+                OrchestratorError::Validation("Upscaled tile height overflowed".into())
+            })?;
+            if out_tile.width() < expected_width || out_tile.height() < expected_height {
+                return Err(OrchestratorError::Pipeline(
+                    PipelineError::DimensionMismatch(format!(
+                        "Model produced {}x{} for a tile requiring {}x{}",
+                        out_tile.width(),
+                        out_tile.height(),
+                        expected_width,
+                        expected_height
+                    )),
+                ));
+            }
+            if out_tile.width() != expected_width || out_tile.height() != expected_height {
+                out_tile =
+                    image::imageops::crop_imm(&out_tile, 0, 0, expected_width, expected_height)
+                        .to_image();
+            }
 
             blender.blend_tile(tile_rect, &out_tile, plan.overlap);
 
-            let _fraction = ((idx + 1) as f32) / (total_tiles as f32);
-            // Non-blocking progress update
+            let fraction = ((idx + 1) as f32) / (total_tiles as f32);
+            let stage_msg = format!("inferencing (tile {}/{})", idx + 1, total_tiles);
+            if !self
+                .db
+                .update_job_progress(&job.id, fraction * 0.9, &stage_msg)?
+            {
+                return Err(OrchestratorError::Cancelled);
+            }
         }
 
         // 4. Finalizing
         cancel.check()?;
-        self.db.update_job_state(&job.id, "finalizing")?;
+        if !self
+            .db
+            .transition_job_state(&job.id, "running", "finalizing")?
+        {
+            return Err(OrchestratorError::Cancelled);
+        }
 
         let mut output_img = blender.finalize();
 
         // Handle target scale (e.g. 2x requested on a 4x native model -> Lanczos3 downsample)
         if job.target_scale < native_scale {
-            let target_w = (width * job.target_scale).max(1);
-            let target_h = (height * job.target_scale).max(1);
+            let target_w = width.checked_mul(job.target_scale).ok_or_else(|| {
+                OrchestratorError::Validation("Requested output width overflowed".into())
+            })?;
+            let target_h = height.checked_mul(job.target_scale).ok_or_else(|| {
+                OrchestratorError::Validation("Requested output height overflowed".into())
+            })?;
             output_img = downsample_lanczos3(&output_img, target_w, target_h)?;
         }
 
+        // Parse configured output format
+        let serialized_format = job.output_format_json.as_deref().ok_or_else(|| {
+            OrchestratorError::Validation("Job is missing its output format".into())
+        })?;
+        let output_format: OutputFormat =
+            serde_json::from_str(serialized_format).map_err(|error| {
+                OrchestratorError::Validation(format!("Job has an invalid output format: {error}"))
+            })?;
+
         // Generate output path
-        let out_dir = Path::new(&job.input_path)
-            .parent()
-            .unwrap_or_else(|| Path::new("."));
+        let out_dir_buf = job
+            .output_directory
+            .as_deref()
+            .filter(|directory| !directory.trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(&job.input_path)
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .to_path_buf()
+            });
+
         let target_path = generate_output_path(
-            out_dir,
+            &out_dir_buf,
             Path::new(&job.input_path),
             &job.model_id,
             job.target_scale,
-            &OutputFormat::Png,
-            false,
+            &output_format,
+            job.overwrite,
         );
 
         // Atomic file write
-        atomic_save_image(&output_img, &target_path, &OutputFormat::Png, Some(Path::new(&job.input_path)))?;
+        atomic_save_image(
+            &output_img,
+            &target_path,
+            &output_format,
+            Some(Path::new(&job.input_path)),
+        )?;
+        if let Err(error) = cancel.check() {
+            let _ = std::fs::remove_file(&target_path);
+            return Err(error.into());
+        }
 
-        // Generate cache-scoped preview thumbnail (max 256x256)
+        // Generate cache-scoped preview thumbnail (bounded to max 256x256)
         let preview_name = format!("{}_preview.png", job.id);
         let preview_path = self.preview_cache_dir.join(preview_name);
-        let (pw, ph) = (
-            (output_img.width() / 4).max(1),
-            (output_img.height() / 4).max(1),
-        );
-        let preview_img = downsample_lanczos3(&output_img, pw, ph)?;
-        atomic_save_image(&preview_img, &preview_path, &OutputFormat::Png, None)?;
+        let finalize_result = (|| -> Result<(String, String), OrchestratorError> {
+            let max_dim = 256.0f32;
+            let scale_factor = f32::min(
+                max_dim / output_img.width() as f32,
+                max_dim / output_img.height() as f32,
+            )
+            .min(1.0);
+            let pw = ((output_img.width() as f32 * scale_factor).round() as u32).max(1);
+            let ph = ((output_img.height() as f32 * scale_factor).round() as u32).max(1);
+            let preview_img = downsample_lanczos3(&output_img, pw, ph)?;
+            atomic_save_image(&preview_img, &preview_path, &OutputFormat::Png, None)?;
+            cancel.check()?;
 
-        // Update DB record to succeeded
-        self.db.update_job_success(
-            &job.id,
-            target_path.to_str().unwrap(),
-            preview_path.to_str().unwrap(),
-        )?;
+            let output_path = target_path
+                .to_str()
+                .ok_or_else(|| {
+                    OrchestratorError::Validation(
+                        "Output path cannot be represented as UTF-8".into(),
+                    )
+                })?
+                .to_string();
+            let preview_path_string = preview_path
+                .to_str()
+                .ok_or_else(|| {
+                    OrchestratorError::Validation(
+                        "Preview path cannot be represented as UTF-8".into(),
+                    )
+                })?
+                .to_string();
+
+            self.db
+                .update_job_success(&job.id, &output_path, &preview_path_string)?;
+            Ok((output_path, preview_path_string))
+        })();
+
+        let (output_path, preview_path_string) = match finalize_result {
+            Ok(paths) => paths,
+            Err(error) => {
+                let _ = std::fs::remove_file(&target_path);
+                let _ = std::fs::remove_file(&preview_path);
+                return Err(error);
+            }
+        };
 
         let mut completed_job = job.clone();
         completed_job.state = "succeeded".to_string();
-        completed_job.output_path = Some(target_path.to_str().unwrap().to_string());
-        completed_job.preview_path = Some(preview_path.to_str().unwrap().to_string());
+        completed_job.output_path = Some(output_path);
+        completed_job.preview_path = Some(preview_path_string);
         completed_job.progress_fraction = 1.0;
-        completed_job.progress_stage = "finalizing".to_string();
+        completed_job.progress_stage = "succeeded".to_string();
 
         Ok(completed_job)
     }
+}
+
+fn default_models_root() -> PathBuf {
+    std::env::var_os("RESVERA_MODELS_DIR")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(|home| PathBuf::from(home).join(".resvera").join("models"))
+        })
+        .unwrap_or_else(|| PathBuf::from(".resvera").join("models"))
+}
+
+fn validate_input_file(input: &str) -> Result<(), OrchestratorError> {
+    let path = Path::new(input);
+    if input.trim().is_empty() || !path.is_file() {
+        return Err(OrchestratorError::Validation(format!(
+            "Input file not found or is not a regular file: {input}"
+        )));
+    }
+    Ok(())
+}
+
+fn normalize_provider(provider: Option<&str>) -> Result<String, OrchestratorError> {
+    let provider = provider.unwrap_or("cpu").trim().to_ascii_lowercase();
+    if provider.is_empty() {
+        return Err(OrchestratorError::Validation(
+            "Provider id must not be empty".into(),
+        ));
+    }
+    Ok(provider)
+}
+
+fn adapter_for_manifest(
+    manifest: &ModelManifest,
+    native_scale: u32,
+) -> Result<Box<dyn ModelAdapter>, OrchestratorError> {
+    match manifest.family.as_str() {
+        "rrdb" | "rrdb-6b" => Ok(Box::new(RrdbAdapter)),
+        "cugan" | "real-cugan" => Ok(Box::new(CuganAdapter::new(native_scale))),
+        "hat" | "real-hat" | "real-hat-gan" => Ok(Box::new(HatAdapter::new(
+            native_scale,
+            manifest.tiling.window_size.unwrap_or(16),
+        ))),
+        family => Err(OrchestratorError::Validation(format!(
+            "Unsupported model family: {family}"
+        ))),
+    }
+}
+
+fn validated_tile_size(
+    requested: Option<u32>,
+    constraints: TileConstraints,
+) -> Result<u32, OrchestratorError> {
+    let tile_size = requested.unwrap_or(constraints.recommended);
+    if tile_size < constraints.minimum
+        || tile_size <= constraints.overlap
+        || !tile_size.is_multiple_of(constraints.alignment)
+    {
+        return Err(OrchestratorError::Validation(format!(
+            "Tile size {tile_size} violates model constraints: minimum {}, overlap {}, alignment {}",
+            constraints.minimum, constraints.overlap, constraints.alignment
+        )));
+    }
+    Ok(tile_size)
 }

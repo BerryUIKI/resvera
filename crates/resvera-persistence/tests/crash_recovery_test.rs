@@ -19,6 +19,10 @@ fn sample_job(id: &str, state: &str) -> JobRecord {
         progress_stage: "inference".to_string(),
         error_code: None,
         error_message: None,
+        output_directory: None,
+        output_format_json: None,
+        overwrite: false,
+        tile_size: None,
         created_at: now.clone(),
         updated_at: now,
     }
@@ -58,13 +62,19 @@ fn test_file_backed_persistence_and_crash_recovery() {
         assert_eq!(db.get_job("job-queued-2").unwrap().unwrap().state, "queued");
 
         // In-flight jobs transitioned to interrupted
-        assert_eq!(db.get_job("job-prep").unwrap().unwrap().state, "interrupted");
+        assert_eq!(
+            db.get_job("job-prep").unwrap().unwrap().state,
+            "interrupted"
+        );
         assert_eq!(db.get_job("job-run").unwrap().unwrap().state, "interrupted");
         assert_eq!(db.get_job("job-fin").unwrap().unwrap().state, "interrupted");
 
         // Terminal jobs remain untouched
         assert_eq!(db.get_job("job-succ").unwrap().unwrap().state, "succeeded");
         assert_eq!(db.get_job("job-fail").unwrap().unwrap().state, "failed");
-        assert_eq!(db.get_job("job-cancelled").unwrap().unwrap().state, "cancelled");
+        assert_eq!(
+            db.get_job("job-cancelled").unwrap().unwrap().state,
+            "cancelled"
+        );
     }
 }
