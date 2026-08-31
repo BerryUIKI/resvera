@@ -48,7 +48,7 @@ fn base_manifest() -> ModelManifest {
             static_shapes_required: true,
         },
         compatibility: CompatibilitySpec {
-            engine: "ort".into(),
+            engine: "onnx-runtime".into(),
             minimum_engine_version: "1.29.0".into(),
             validated_providers: vec!["cpu".into()],
             validated_precisions: vec!["fp32".into()],
@@ -56,7 +56,7 @@ fn base_manifest() -> ModelManifest {
         artifacts: vec![ArtifactEntry {
             path: "artifacts/model.onnx".into(),
             size_bytes: 100,
-            sha256: "deadbeef".into(),
+            sha256: "0".repeat(64),
         }],
     }
 }
