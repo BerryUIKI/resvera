@@ -1,6 +1,6 @@
 use crate::signing::SigningError;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -61,13 +61,64 @@ impl SignedRuntimeCatalog {
         let mut pk_arr = [0u8; 32];
         pk_arr.copy_from_slice(&pk_vec);
 
-        crate::signing::verify_signature_hex(
-            &pk_arr,
-            self.payload.as_bytes(),
-            &self.signature,
-        )?;
+        crate::signing::verify_signature_hex(&pk_arr, self.payload.as_bytes(), &self.signature)?;
         let catalog: RuntimeCatalog = serde_json::from_str(&self.payload)?;
+        catalog.validate()?;
         Ok(catalog)
+    }
+}
+
+impl RuntimeCatalog {
+    pub fn validate(&self) -> Result<(), RuntimeError> {
+        if self.schema_version != 1 {
+            return Err(RuntimeError::InstallFailed(format!(
+                "Unsupported runtime catalog schema {}",
+                self.schema_version
+            )));
+        }
+        let mut component_keys = HashSet::new();
+        for component in &self.components {
+            crate::validate_path_component(&component.id, "component.id")
+                .map_err(RuntimeError::InstallFailed)?;
+            crate::validate_path_component(&component.version, "component.version")
+                .map_err(RuntimeError::InstallFailed)?;
+            if !component_keys.insert((
+                &component.id,
+                &component.version,
+                &component.target_platform,
+            )) {
+                return Err(RuntimeError::InstallFailed(format!(
+                    "Duplicate runtime component {} {} for {}",
+                    component.id, component.version, component.target_platform
+                )));
+            }
+            if component.artifacts.is_empty() {
+                return Err(RuntimeError::InstallFailed(format!(
+                    "Runtime component {} has no artifacts",
+                    component.id
+                )));
+            }
+            let mut names = HashSet::new();
+            for artifact in &component.artifacts {
+                crate::validate_path_component(&artifact.name, "artifact.name")
+                    .map_err(RuntimeError::InstallFailed)?;
+                if !names.insert(&artifact.name) {
+                    return Err(RuntimeError::InstallFailed(format!(
+                        "Duplicate runtime artifact {}",
+                        artifact.name
+                    )));
+                }
+                if artifact.sha256.len() != 64
+                    || !artifact.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+                {
+                    return Err(RuntimeError::InstallFailed(format!(
+                        "Runtime artifact '{}' has an invalid SHA-256 digest",
+                        artifact.name
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -85,41 +136,86 @@ impl RuntimeInstaller {
     pub fn install_component(
         &self,
         manifest: &RuntimeComponentManifest,
-        staged_files: &[(PathBuf, String)], // (source_path, expected_sha256)
+        staged_files: &[PathBuf],
     ) -> Result<PathBuf, RuntimeError> {
-        // 1. Verify all staged files match expected SHA-256
-        for (file_path, expected_hash) in staged_files {
-            let data = fs::read(file_path)?;
-            let mut hasher = Sha256::new();
-            hasher.update(&data);
-            let actual_hash = hex::encode(hasher.finalize());
-            if !actual_hash.eq_ignore_ascii_case(expected_hash) {
-                return Err(RuntimeError::HashMismatch {
-                    expected: expected_hash.clone(),
-                    actual: actual_hash,
-                });
+        crate::validate_path_component(&manifest.id, "manifest.id")
+            .map_err(RuntimeError::InstallFailed)?;
+        crate::validate_path_component(&manifest.version, "manifest.version")
+            .map_err(RuntimeError::InstallFailed)?;
+        RuntimeCatalog {
+            schema_version: 1,
+            updated_at: String::new(),
+            components: vec![manifest.clone()],
+        }
+        .validate()?;
+
+        if staged_files.len() != manifest.artifacts.len() {
+            return Err(RuntimeError::InstallFailed(format!(
+                "Expected {} staged artifacts, got {}",
+                manifest.artifacts.len(),
+                staged_files.len()
+            )));
+        }
+        let declared: HashMap<&str, &RuntimeArtifact> = manifest
+            .artifacts
+            .iter()
+            .map(|artifact| (artifact.name.as_str(), artifact))
+            .collect();
+        let mut staged_by_name = HashMap::new();
+        for path in staged_files {
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| RuntimeError::InstallFailed("Invalid staged file name".into()))?;
+            if !path.is_file()
+                || !declared.contains_key(name)
+                || staged_by_name.insert(name, path).is_some()
+            {
+                return Err(RuntimeError::InstallFailed(format!(
+                    "Staged artifact '{name}' is missing, duplicate, or undeclared"
+                )));
             }
         }
 
-        let target_dir = self.runtime_dir.join(&manifest.id).join(&manifest.version);
-        let backup_dir = self.runtime_dir.join(&manifest.id).join(format!("{}.backup", manifest.version));
-
-        if target_dir.exists() {
-            let _ = fs::rename(&target_dir, &backup_dir);
+        // Validate every staged artifact before moving an already-installed version aside.
+        for artifact in &manifest.artifacts {
+            verify_runtime_artifact(staged_by_name[artifact.name.as_str()], artifact)?;
         }
 
-        fs::create_dir_all(&target_dir)?;
+        let component_dir = self.runtime_dir.join(&manifest.id);
+        let target_dir = component_dir.join(&manifest.version);
+        let backup_dir = component_dir.join(format!(
+            "{}.backup.{}",
+            manifest.version,
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&component_dir)?;
 
-        for (file_path, _) in staged_files {
-            let file_name = file_path.file_name().unwrap();
-            let dest_path = target_dir.join(file_name);
-            if let Err(e) = fs::copy(file_path, &dest_path) {
-                // Rollback
+        if target_dir.exists() {
+            fs::rename(&target_dir, &backup_dir)?;
+        }
+
+        if let Err(error) = fs::create_dir(&target_dir) {
+            restore_runtime_backup(&backup_dir, &target_dir);
+            return Err(RuntimeError::Io(error));
+        }
+
+        for artifact in &manifest.artifacts {
+            let source_path = staged_by_name[artifact.name.as_str()];
+            let dest_path = target_dir.join(&artifact.name);
+            if let Err(error) = fs::copy(source_path, &dest_path) {
                 let _ = fs::remove_dir_all(&target_dir);
-                if backup_dir.exists() {
-                    let _ = fs::rename(&backup_dir, &target_dir);
-                }
-                return Err(RuntimeError::InstallFailed(e.to_string()));
+                restore_runtime_backup(&backup_dir, &target_dir);
+                return Err(RuntimeError::InstallFailed(error.to_string()));
+            }
+        }
+
+        for artifact in &manifest.artifacts {
+            let dest_path = target_dir.join(&artifact.name);
+            if let Err(error) = verify_runtime_artifact(&dest_path, artifact) {
+                let _ = fs::remove_dir_all(&target_dir);
+                restore_runtime_backup(&backup_dir, &target_dir);
+                return Err(error);
             }
         }
 
@@ -130,7 +226,15 @@ impl RuntimeInstaller {
         Ok(target_dir)
     }
 
-    pub fn rollback_component(&self, component_id: &str, target_version: &str) -> Result<(), RuntimeError> {
+    pub fn rollback_component(
+        &self,
+        component_id: &str,
+        target_version: &str,
+    ) -> Result<(), RuntimeError> {
+        crate::validate_path_component(component_id, "component_id")
+            .map_err(RuntimeError::InstallFailed)?;
+        crate::validate_path_component(target_version, "target_version")
+            .map_err(RuntimeError::InstallFailed)?;
         let comp_dir = self.runtime_dir.join(component_id);
         let version_dir = comp_dir.join(target_version);
         if !version_dir.exists() {
@@ -141,7 +245,47 @@ impl RuntimeInstaller {
         }
         // Active link/version is established
         let active_marker = comp_dir.join("active_version.txt");
-        fs::write(active_marker, target_version)?;
+        let temp_marker = comp_dir.join(format!("active_version.tmp.{}", uuid::Uuid::new_v4()));
+        let backup_marker =
+            comp_dir.join(format!("active_version.backup.{}", uuid::Uuid::new_v4()));
+        fs::write(&temp_marker, target_version)?;
+        if active_marker.exists() {
+            if let Err(error) = fs::rename(&active_marker, &backup_marker) {
+                let _ = fs::remove_file(&temp_marker);
+                return Err(RuntimeError::Io(error));
+            }
+        }
+        if let Err(error) = fs::rename(&temp_marker, active_marker) {
+            let _ = fs::remove_file(temp_marker);
+            if backup_marker.exists() {
+                let _ = fs::rename(backup_marker, comp_dir.join("active_version.txt"));
+            }
+            return Err(RuntimeError::Io(error));
+        }
+        if backup_marker.exists() {
+            let _ = fs::remove_file(backup_marker);
+        }
         Ok(())
+    }
+}
+
+fn verify_runtime_artifact(
+    artifact_path: &Path,
+    artifact: &RuntimeArtifact,
+) -> Result<(), RuntimeError> {
+    let actual_size = fs::metadata(artifact_path)?.len();
+    let actual_hash = crate::signing::compute_file_sha256(artifact_path)?;
+    if actual_size != artifact.size_bytes || !actual_hash.eq_ignore_ascii_case(&artifact.sha256) {
+        return Err(RuntimeError::HashMismatch {
+            expected: format!("{} ({} bytes)", artifact.sha256, artifact.size_bytes),
+            actual: format!("{} ({} bytes)", actual_hash, actual_size),
+        });
+    }
+    Ok(())
+}
+
+fn restore_runtime_backup(backup_dir: &Path, target_dir: &Path) {
+    if backup_dir.exists() && !target_dir.exists() {
+        let _ = fs::rename(backup_dir, target_dir);
     }
 }
