@@ -14,12 +14,15 @@ impl CascadePipeline {
         Self { engine }
     }
 
-    /// Executes an 8x cascade: Pass 1 (4x upscale) followed by Pass 2 (2x upscale).
-    pub fn run_8x_cascade(
+    /// Executes an 8x cascade with custom model weights.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_8x_cascade_with_weights(
         &self,
         src_img: &RgbImage,
         adapter_pass1: &dyn ModelAdapter,
+        weights_pass1: &[u8],
         adapter_pass2: &dyn ModelAdapter,
+        weights_pass2: &[u8],
         target_scale: u32,
         cancel: &CancellationToken,
     ) -> Result<RgbImage, PipelineError> {
@@ -28,8 +31,8 @@ impl CascadePipeline {
         // --- PASS 1: 4x Super-Resolution ---
         let (w1, h1) = src_img.dimensions();
         let plan1 = TilePlan::build(w1, h1, 32, 8);
-        let mut session1 = self.engine.load(b"pass1_bytes", None)?;
-        let mut blender1 = TileBlender::new(w1, h1, 4);
+        let mut session1 = self.engine.load(weights_pass1, None)?;
+        let mut blender1 = TileBlender::try_new(w1, h1, 4)?;
 
         for tile in &plan1.tiles {
             cancel.check()?;
@@ -52,8 +55,8 @@ impl CascadePipeline {
         // --- PASS 2: 2x Super-Resolution (giving 4x * 2x = 8x total) ---
         let (w2, h2) = pass1_img.dimensions();
         let plan2 = TilePlan::build(w2, h2, 32, 8);
-        let mut session2 = self.engine.load(b"pass2_bytes", None)?;
-        let mut blender2 = TileBlender::new(w2, h2, 2);
+        let mut session2 = self.engine.load(weights_pass2, None)?;
+        let mut blender2 = TileBlender::try_new(w2, h2, 2)?;
 
         for tile in &plan2.tiles {
             cancel.check()?;
@@ -81,5 +84,19 @@ impl CascadePipeline {
         }
 
         Ok(final_8x_img)
+    }
+
+    /// A cascade cannot run without two explicitly selected and verified model artifacts.
+    pub fn run_8x_cascade(
+        &self,
+        _src_img: &RgbImage,
+        _adapter_pass1: &dyn ModelAdapter,
+        _adapter_pass2: &dyn ModelAdapter,
+        _target_scale: u32,
+        _cancel: &CancellationToken,
+    ) -> Result<RgbImage, PipelineError> {
+        Err(PipelineError::Validation(
+            "8x cascade requires two explicitly verified model artifacts".into(),
+        ))
     }
 }
