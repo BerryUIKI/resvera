@@ -3,7 +3,6 @@ use resvera_core::{
     atomic_save_image, BatchJobDefaults, BatchJobRequest, JobOrchestrator, OutputFormat,
     UpscaleJobRequest,
 };
-use resvera_engine_ort::OrtEngine;
 use resvera_persistence::AppDatabase;
 use std::sync::Arc;
 use tempfile::tempdir;
@@ -22,7 +21,7 @@ fn create_test_image(path: &std::path::Path, width: u32, height: u32) {
 fn test_single_job_orchestration() {
     let temp = tempdir().unwrap();
     let db = AppDatabase::new_in_memory().unwrap();
-    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let engine = Arc::new(MockEngine);
     let orchestrator = JobOrchestrator::new(db.clone(), engine, temp.path().join("previews"));
 
     let input_path = temp.path().join("input.png");
@@ -55,7 +54,7 @@ fn test_single_job_orchestration() {
 fn test_batch_jobs_and_pause_resume() {
     let temp = tempdir().unwrap();
     let db = AppDatabase::new_in_memory().unwrap();
-    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let engine = Arc::new(MockEngine);
     let orchestrator = JobOrchestrator::new(db.clone(), engine, temp.path().join("previews"));
 
     let in1 = temp.path().join("in1.png");
@@ -112,7 +111,7 @@ fn test_batch_jobs_and_pause_resume() {
 fn test_100_job_stress_batch() {
     let temp = tempdir().unwrap();
     let db = AppDatabase::new_in_memory().unwrap();
-    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let engine = Arc::new(MockEngine);
     let orchestrator = JobOrchestrator::new(db.clone(), engine, temp.path().join("previews"));
 
     let in_img = temp.path().join("stress_in.png");
@@ -147,3 +146,6 @@ fn test_100_job_stress_batch() {
 
     assert!(orchestrator.process_next_job().unwrap().is_none());
 }
+mod common;
+
+use common::MockEngine;
