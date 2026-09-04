@@ -1,6 +1,7 @@
 import { Component, createSignal } from "solid-js";
 import { useI18n } from "../i18n";
 import { DropZone } from "./DropZone";
+import { resolveImageUrl } from "../lib/api";
 
 interface ComparisonViewerProps {
   beforeUrl: string | null;
@@ -16,32 +17,58 @@ export const ComparisonViewer: Component<ComparisonViewerProps> = (props) => {
   const [splitPos, setSplitPos] = createSignal(50);
   const [zoom, setZoom] = createSignal(1);
 
+  const resolvedBefore = () => resolveImageUrl(props.beforeUrl);
+  const resolvedAfter = () => resolveImageUrl(props.afterUrl);
+  const [isDraggingSlider, setIsDraggingSlider] = createSignal(false);
+
+  const handlePointerMove = (e: MouseEvent | TouchEvent) => {
+    if (!resolvedAfter()) return;
+    const clientX = "touches" in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
+    const target = e.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    if (rect.width > 0) {
+      const pos = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
+      setSplitPos(pos);
+    }
+  };
+
   return (
     <div class="relative w-full h-full flex flex-col items-center justify-center bg-slate-950/60 overflow-hidden border border-slate-800/80 rounded-2xl">
-      {props.beforeUrl ? (
+      {resolvedBefore() ? (
         <div class="relative w-full h-full flex items-center justify-center overflow-hidden p-2">
-          {/* Main Image Container */}
+          {/* Main Image Container with Drag Interaction */}
           <div
-            class="relative max-w-full max-h-full transition-transform duration-75 flex items-center justify-center"
+            onMouseDown={() => setIsDraggingSlider(true)}
+            onMouseUp={() => setIsDraggingSlider(false)}
+            onMouseLeave={() => setIsDraggingSlider(false)}
+            onMouseMove={(e) => {
+              if (isDraggingSlider() || e.buttons === 1) {
+                handlePointerMove(e);
+              }
+            }}
+            onTouchMove={handlePointerMove}
+            class={`relative max-w-full max-h-full transition-transform duration-75 flex items-center justify-center select-none ${
+              resolvedAfter() ? "cursor-ew-resize" : ""
+            }`}
             style={{ transform: `scale(${zoom()})` }}
           >
             {/* After Image (Full background or overlay) */}
             <img
-              src={props.afterUrl || props.beforeUrl}
+              src={resolvedAfter() || resolvedBefore() || ""}
               alt="After"
               class={`max-w-[70vw] max-h-[65vh] object-contain rounded-xl select-none shadow-2xl pointer-events-none ${
-                props.afterUrl ? "filter contrast-105" : ""
+                resolvedAfter() ? "filter contrast-105" : ""
               }`}
             />
 
             {/* Before Image (Clipped overlay) */}
-            {props.afterUrl && (
+            {resolvedAfter() && (
               <div
-                class="absolute inset-0 overflow-hidden flex items-center justify-center"
+                class="absolute inset-0 overflow-hidden flex items-center justify-center pointer-events-none"
                 style={{ "clip-path": `polygon(0 0, ${splitPos()}% 0, ${splitPos()}% 100%, 0 100%)` }}
               >
                 <img
-                  src={props.beforeUrl}
+                  src={resolvedBefore() || ""}
                   alt="Before"
                   class="max-w-[70vw] max-h-[65vh] object-contain rounded-xl select-none pointer-events-none"
                 />
@@ -49,7 +76,7 @@ export const ComparisonViewer: Component<ComparisonViewerProps> = (props) => {
             )}
 
             {/* Slider Divider Line */}
-            {props.afterUrl && (
+            {resolvedAfter() && (
               <div
                 class="absolute top-0 bottom-0 w-0.5 bg-sky-400 shadow-xl pointer-events-none"
                 style={{ left: `${splitPos()}%` }}
@@ -60,6 +87,14 @@ export const ComparisonViewer: Component<ComparisonViewerProps> = (props) => {
               </div>
             )}
           </div>
+
+          {/* Top Banner when Upscaled Image is Ready */}
+          {resolvedAfter() && (
+            <div class="absolute top-4 left-4 flex items-center space-x-2 bg-emerald-950/80 backdrop-blur-md px-3 py-1.5 rounded-xl border border-emerald-700/80 text-emerald-400 text-xs shadow-lg">
+              <span>✨</span>
+              <span class="font-semibold">超分辨率增强完成 (可拖动画布左右对比)</span>
+            </div>
+          )}
 
           {/* Processing State HUD Overlay */}
           {props.isProcessing && (
@@ -86,8 +121,8 @@ export const ComparisonViewer: Component<ComparisonViewerProps> = (props) => {
           )}
 
           {/* Range Slider for Split */}
-          {props.afterUrl && (
-            <div class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center space-x-3 bg-slate-900/90 backdrop-blur-md px-5 py-2.5 rounded-full border border-slate-700 shadow-2xl">
+          {resolvedAfter() && (
+            <div class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center space-x-3 bg-slate-900/90 backdrop-blur-md px-5 py-2.5 rounded-full border border-slate-700 shadow-2xl z-10">
               <span class="text-xs text-slate-400 font-semibold">{t("viewer.before")}</span>
               <input
                 type="range"

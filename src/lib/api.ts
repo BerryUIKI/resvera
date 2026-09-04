@@ -1,6 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import {
   AppSettings,
+  JobHistoryPage,
   JobSnapshot,
   ModelSummary,
   QueueSnapshot,
@@ -8,8 +9,29 @@ import {
   UpscaleJobRequest,
 } from "../types/ipc";
 
-function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+export function isTauri(): boolean {
+  return typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
+}
+
+export function resolveImageUrl(pathOrUrl: string | null | undefined): string | null {
+  if (!pathOrUrl) return null;
+  if (
+    pathOrUrl.startsWith("blob:") ||
+    pathOrUrl.startsWith("data:") ||
+    pathOrUrl.startsWith("http://") ||
+    pathOrUrl.startsWith("https://") ||
+    pathOrUrl.startsWith("asset://")
+  ) {
+    return pathOrUrl;
+  }
+  if (isTauri()) {
+    try {
+      return convertFileSrc(pathOrUrl);
+    } catch {
+      return pathOrUrl;
+    }
+  }
+  return pathOrUrl;
 }
 
 export async function getRuntimeStatus(): Promise<RuntimeStatus> {
@@ -181,7 +203,66 @@ export async function createUpscaleJob(req: UpscaleJobRequest): Promise<JobSnaps
   if (isTauri()) {
     return await invoke<JobSnapshot>("create_upscale_job", { req });
   }
-  throw new Error("Tauri runtime required for job creation");
+  throw new Error("Tauri native runtime required for image upscaling; simulation disabled.");
+}
+
+export async function createBatchJobs(req: { inputs: string[]; defaults: any }): Promise<JobSnapshot[]> {
+  if (isTauri()) {
+    return await invoke<JobSnapshot[]>("create_batch_jobs", { req });
+  }
+  throw new Error("Tauri native runtime required for batch jobs; simulation disabled.");
+}
+
+export async function getJobsHistory(limit = 50): Promise<JobHistoryPage> {
+  if (isTauri()) {
+    return await invoke<JobHistoryPage>("get_jobs_history", { limit });
+  }
+  return { jobs: [], nextCursor: null };
+}
+
+export async function processNextJob(): Promise<JobSnapshot | null> {
+  if (isTauri()) {
+    return await invoke<JobSnapshot | null>("process_next_job");
+  }
+  return null;
+}
+
+export async function cancelJob(jobId: string): Promise<JobSnapshot | null> {
+  if (isTauri()) {
+    return await invoke<JobSnapshot>("cancel_job", { jobId });
+  }
+  return null;
+}
+
+export async function getJob(jobId: string): Promise<JobSnapshot | null> {
+  if (isTauri()) {
+    return await invoke<JobSnapshot>("get_job", { jobId });
+  }
+  return null;
+}
+
+export async function pauseQueue(): Promise<QueueSnapshot> {
+  if (isTauri()) {
+    return await invoke<QueueSnapshot>("pause_queue");
+  }
+  return {
+    paused: true,
+    activeJobId: null,
+    queuedJobIds: [],
+    revision: "rev-paused",
+  };
+}
+
+export async function resumeQueue(): Promise<QueueSnapshot> {
+  if (isTauri()) {
+    return await invoke<QueueSnapshot>("resume_queue");
+  }
+  return {
+    paused: false,
+    activeJobId: null,
+    queuedJobIds: [],
+    revision: "rev-resumed",
+  };
 }
 
 export async function getQueue(): Promise<QueueSnapshot> {

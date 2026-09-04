@@ -142,6 +142,11 @@ export interface QueueSnapshot {
   revision: string;
 }
 
+export interface JobHistoryPage {
+  jobs: JobSnapshot[];
+  nextCursor: string | null;
+}
+
 export interface AppSettings {
   schemaVersion: number;
   outputDirectory: string | null;

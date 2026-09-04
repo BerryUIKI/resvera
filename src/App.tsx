@@ -1,13 +1,24 @@
-import { Component, createSignal, onMount, For, Show } from "solid-js";
+import { Component, createSignal, onMount, onCleanup, For, Show } from "solid-js";
 import { Header } from "./components/Header";
 import { ComparisonViewer } from "./components/ComparisonViewer";
 import { QueueList } from "./components/QueueList";
 import { SettingsModal } from "./components/SettingsModal";
 import { ModelCenterModal } from "./components/ModelCenterModal";
-import { getRuntimeStatus, listModels, loadSettings, saveSettings } from "./lib/api";
+import {
+  createUpscaleJob,
+  getRuntimeStatus,
+  listModels,
+  loadSettings,
+  cancelJob,
+  getJobsHistory,
+  pauseQueue,
+  resumeQueue,
+  getQueue,
+  saveSettings,
+  isTauri,
+} from "./lib/api";
 import { AppSettings, JobSnapshot, ModelSummary, RuntimeStatus } from "./types/ipc";
 import { useI18n } from "./i18n";
-import { generateUpscaledOutput } from "./lib/upscale";
 
 export const App: Component = () => {
   const { t, setLocale } = useI18n();
@@ -44,6 +55,7 @@ export const App: Component = () => {
   const [jpegQuality, setJpegQuality] = createSignal(95);
   const [webpLossless, setWebpLossless] = createSignal(true);
   const [overwrite, setOverwrite] = createSignal(false);
+  const [customOutputDir, setCustomOutputDir] = createSignal("");
 
   // Advanced Tuning State
   const [selectedProvider, setSelectedProvider] = createSignal("automatic");
@@ -67,56 +79,183 @@ export const App: Component = () => {
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
   const [isModelCenterOpen, setIsModelCenterOpen] = createSignal(false);
 
-  onMount(async () => {
-    const [status, modelList, appSettings] = await Promise.all([
-      getRuntimeStatus(),
-      listModels(),
-      loadSettings(),
-    ]);
-    setRuntimeStatus(status);
-    setModels(modelList);
-    setSettings(appSettings);
-    if (appSettings.locale) {
-      setLocale(appSettings.locale as any);
+  const syncQueueState = async () => {
+    if (!isTauri()) return;
+    try {
+      const [history, queue] = await Promise.all([
+        getJobsHistory(50),
+        getQueue(),
+      ]);
+
+      setIsPaused(queue.paused);
+      const isAnyActive =
+        queue.activeJobId !== null ||
+        queue.queuedJobIds.length > 0 ||
+        history.jobs.some((j) => j.state === "running" || j.state === "preparing" || j.state === "finalizing");
+      setIsProcessingQueue(isAnyActive);
+
+      if (history.jobs.length > 0) {
+        setJobs((prev) => {
+          const prevMap = new Map(prev.map((j) => [j.id, j]));
+          return history.jobs.map((job) => {
+            const existing = prevMap.get(job.id);
+            return {
+              ...job,
+              previewPath: job.previewPath || existing?.previewPath || null,
+              outputPath: job.outputPath || existing?.outputPath || null,
+            };
+          });
+        });
+
+        if (!selectedJobId() && history.jobs.length > 0) {
+          setSelectedJobId(history.jobs[0].id);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to sync queue state from backend:", err);
     }
+  };
+
+  onMount(async () => {
+    try {
+      const [status, modelList, appSettings] = await Promise.all([
+        getRuntimeStatus(),
+        listModels(),
+        loadSettings(),
+      ]);
+      setRuntimeStatus(status);
+      setModels(modelList);
+      setSettings(appSettings);
+      if (appSettings.outputDirectory) {
+        setCustomOutputDir(appSettings.outputDirectory);
+      }
+      if (appSettings.locale) {
+        setLocale(appSettings.locale as any);
+      }
+      await syncQueueState();
+    } catch (err) {
+      console.error("Failed to initialize backend runtime or settings:", err);
+    }
+
+    const interval = setInterval(() => {
+      syncQueueState();
+    }, 600);
+
+    onCleanup(() => {
+      clearInterval(interval);
+    });
   });
 
-  const addFilesToQueue = (files: File[]) => {
-    if (!files || files.length === 0) return;
+  const handleStartUpscale = async (specificJobId?: string) => {
+    if (!isTauri()) return;
 
-    const newJobs: JobSnapshot[] = files.map((file) => {
-      const id = `job-${Math.random().toString(36).substring(2, 9)}`;
-      const url = URL.createObjectURL(file);
-      return {
-        id,
-        state: "queued",
-        inputPath: file.name,
-        outputPath: null,
-        previewPath: url,
-        modelId: selectedModelId(),
-        modelPackageVersion: "1.0.0",
-        modelVariantId: selectedVariantId(),
-        targetScale: targetScale(),
-        engineId: "ort",
-        providerId: selectedProvider() === "automatic" ? "cpu" : selectedProvider(),
-        progress: {
-          fraction: 0,
-          stage: "queued",
-          completedUnits: 0,
-          totalUnits: 1,
-          elapsedSeconds: 0,
-          estimatedRemainingSeconds: null,
-        },
-        error: null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-    });
-
-    setJobs((prev) => [...prev, ...newJobs]);
-    if (!selectedJobId() && newJobs.length > 0) {
-      setSelectedJobId(newJobs[0].id);
+    if (specificJobId) {
+      setSelectedJobId(specificJobId);
+      const targetJob = jobs().find((j) => j.id === specificJobId);
+      if (targetJob && targetJob.state !== "running" && targetJob.state !== "queued") {
+        const targetOutDir = customOutputDir().trim() || settings().outputDirectory || "";
+        try {
+          const created = await createUpscaleJob({
+            inputPath: targetJob.inputPath,
+            outputDirectory: targetOutDir,
+            modelId: selectedModelId(),
+            modelVariantId: selectedVariantId(),
+            targetScale: targetScale(),
+            outputFormat: settings().outputFormat,
+            overwrite: settings().overwriteExisting,
+            tileSize: settings().tileSizeOverride,
+            providerPreference: selectedProvider() === "automatic" ? null : selectedProvider(),
+          });
+          setSelectedJobId(created.id);
+        } catch (err) {
+          console.error("Failed to re-queue job:", err);
+        }
+      }
+    } else {
+      const cur = currentJob();
+      if (cur && cur.state !== "running" && cur.state !== "queued") {
+        const targetOutDir = customOutputDir().trim() || settings().outputDirectory || "";
+        try {
+          const created = await createUpscaleJob({
+            inputPath: cur.inputPath,
+            outputDirectory: targetOutDir,
+            modelId: selectedModelId(),
+            modelVariantId: selectedVariantId(),
+            targetScale: targetScale(),
+            outputFormat: settings().outputFormat,
+            overwrite: settings().overwriteExisting,
+            tileSize: settings().tileSizeOverride,
+            providerPreference: selectedProvider() === "automatic" ? null : selectedProvider(),
+          });
+          setSelectedJobId(created.id);
+        } catch (err) {
+          console.error("Failed to submit job:", err);
+        }
+      }
     }
+
+    if (isPaused()) {
+      try {
+        await resumeQueue();
+        setIsPaused(false);
+      } catch (err) {
+        console.warn("Failed to resume queue:", err);
+      }
+    }
+    await syncQueueState();
+  };
+
+  const handleTogglePause = async () => {
+    if (!isTauri()) return;
+    try {
+      if (isPaused()) {
+        const res = await resumeQueue();
+        setIsPaused(res.paused);
+      } else {
+        const res = await pauseQueue();
+        setIsPaused(res.paused);
+      }
+      await syncQueueState();
+    } catch (err) {
+      console.warn("Failed to toggle queue pause:", err);
+    }
+  };
+
+  const addFilesToQueue = async (files: File[]) => {
+    if (!files || files.length === 0) return;
+    if (!isTauri()) {
+      alert("Tauri native desktop runtime is required for image processing.");
+      return;
+    }
+
+    const targetOutDir = customOutputDir().trim() || settings().outputDirectory || "";
+
+    for (const file of files) {
+      const filePath = (file as any).path || "";
+      if (!filePath) {
+        console.warn("File object missing native filesystem path:", file.name);
+        continue;
+      }
+
+      try {
+        const created = await createUpscaleJob({
+          inputPath: filePath,
+          outputDirectory: targetOutDir,
+          modelId: selectedModelId(),
+          modelVariantId: selectedVariantId(),
+          targetScale: targetScale(),
+          outputFormat: settings().outputFormat,
+          overwrite: settings().overwriteExisting,
+          tileSize: settings().tileSizeOverride,
+          providerPreference: selectedProvider() === "automatic" ? null : selectedProvider(),
+        });
+        setSelectedJobId(created.id);
+      } catch (err) {
+        console.error("Failed to submit upscale job to backend queue:", err);
+      }
+    }
+
+    await syncQueueState();
   };
 
   const handleFileUpload = (e: Event) => {
@@ -125,116 +264,13 @@ export const App: Component = () => {
     addFilesToQueue(Array.from(target.files));
   };
 
-  const handleCancelJob = (id: string) => {
-    setJobs((prev) =>
-      prev.map((j) => (j.id === id ? { ...j, state: "cancelled" as const } : j))
-    );
-  };
-
-  // Queue Processing Runner
-  const startProcessingQueue = async () => {
-    if (isProcessingQueue()) return;
-    setIsProcessingQueue(true);
-
-    const queuedJobs = jobs().filter((j) => j.state === "queued");
-    for (const job of queuedJobs) {
-      if (isPaused()) break;
-
-      setSelectedJobId(job.id);
-
-      // 1. Preparing
-      setJobs((prev) =>
-        prev.map((j) =>
-          j.id === job.id
-            ? {
-                ...j,
-                state: "running" as const,
-                progress: {
-                  stage: `preparing (${selectedProvider().toUpperCase()} session)`,
-                  fraction: 0.1,
-                  completedUnits: 0,
-                  totalUnits: 5,
-                  elapsedSeconds: 0,
-                  estimatedRemainingSeconds: 2,
-                },
-              }
-            : j
-        )
-      );
-      await new Promise((r) => setTimeout(r, 400));
-
-      // 2. Inferencing with live progress steps
-      for (let p = 1; p <= 4; p++) {
-        if (isPaused()) break;
-        setJobs((prev) =>
-          prev.map((j) =>
-            j.id === job.id
-              ? {
-                  ...j,
-                  progress: {
-                    stage: `inferencing (tile ${p}/4, overlap ${selectedTileOverlap()}px)`,
-                    fraction: (p * 20) / 100,
-                    completedUnits: p,
-                    totalUnits: 4,
-                    elapsedSeconds: p * 0.3,
-                    estimatedRemainingSeconds: (4 - p) * 0.3,
-                  },
-                }
-              : j
-          )
-        );
-        await new Promise((r) => setTimeout(r, 250));
-      }
-
-      // 3. Finalizing
-      setJobs((prev) =>
-        prev.map((j) =>
-          j.id === job.id
-            ? {
-                ...j,
-                progress: {
-                  stage: `finalizing (${selectedBlendMode()} feather & Lanczos3)`,
-                  fraction: 0.95,
-                  completedUnits: 4,
-                  totalUnits: 4,
-                  elapsedSeconds: 1.5,
-                  estimatedRemainingSeconds: 0,
-                },
-              }
-            : j
-        )
-      );
-      await new Promise((r) => setTimeout(r, 300));
-
-      // 4. Succeeded - generate real super-resolution enhanced output image
-      const upscaledUrl = await generateUpscaledOutput(
-        job.previewPath || "",
-        job.targetScale,
-        job.modelId
-      );
-
-      setJobs((prev) =>
-        prev.map((j) =>
-          j.id === job.id
-            ? {
-                ...j,
-                state: "succeeded" as const,
-                outputPath: upscaledUrl,
-                progress: {
-                  stage: "completed",
-                  fraction: 1.0,
-                  completedUnits: 4,
-                  totalUnits: 4,
-                  elapsedSeconds: 1.8,
-                  estimatedRemainingSeconds: 0,
-                },
-              }
-            : j
-        )
-      );
+  const handleCancelJob = async (id: string) => {
+    try {
+      await cancelJob(id);
+    } catch (err) {
+      console.warn("Cancel job IPC error:", err);
     }
-
-    setIsProcessingQueue(false);
+    await syncQueueState();
   };
 
   const handleModelChange = (modelId: string) => {
@@ -282,13 +318,58 @@ export const App: Component = () => {
             selectedJobId={selectedJobId()}
             onSelectJob={setSelectedJobId}
             onCancelJob={handleCancelJob}
+            onStartJob={handleStartUpscale}
             isPaused={isPaused()}
-            onTogglePause={() => setIsPaused((p) => !p)}
+            onTogglePause={handleTogglePause}
           />
         </div>
 
         {/* Center: Interactive Comparison Canvas & DropZone */}
         <div class="flex-1 flex flex-col p-4 bg-slate-950/40 min-w-0">
+          <Show when={currentJob()}>
+            <div class="flex items-center justify-between bg-slate-900/80 px-4 py-2.5 rounded-xl border border-slate-800 mb-3 select-none">
+              <div class="flex items-center space-x-3 min-w-0">
+                <span class="text-xs font-semibold text-slate-200 truncate">
+                  {currentJob()?.inputPath.split(/[\\/]/).pop()}
+                </span>
+                <span class="text-[11px] text-sky-400 font-mono font-medium">
+                  {currentJob()?.modelId} ({currentJob()?.targetScale}x)
+                </span>
+                <span
+                  class={`text-[10px] px-2 py-0.5 rounded border ${
+                    currentJob()?.state === "succeeded"
+                      ? "bg-emerald-950/80 text-emerald-400 border-emerald-800"
+                      : currentJob()?.state === "running"
+                      ? "bg-sky-950/80 text-sky-400 border-sky-800 animate-pulse"
+                      : "bg-slate-800 text-slate-400 border-slate-700"
+                  }`}
+                >
+                  {currentJob()?.state === "succeeded"
+                    ? "✓ 已完成"
+                    : currentJob()?.state === "running"
+                    ? "⏳ 处理中..."
+                    : "• 排队等待中 (Queued)"}
+                </span>
+              </div>
+
+              <div class="flex items-center space-x-2">
+                <Show when={currentJob()?.state !== "running"}>
+                  <button
+                    onClick={() => handleStartUpscale(currentJob()?.id)}
+                    class="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-lg shadow-md shadow-emerald-500/20 transition cursor-pointer"
+                  >
+                    <span>⚡</span>
+                    <span>
+                      {currentJob()?.state === "succeeded"
+                        ? "重新放大 (Re-run)"
+                        : "开始放大 (Upscale)"}
+                    </span>
+                  </button>
+                </Show>
+              </div>
+            </div>
+          </Show>
+
           <div class="flex-1 min-h-0">
             <ComparisonViewer
               beforeUrl={currentJob()?.previewPath || null}
@@ -598,6 +679,65 @@ export const App: Component = () => {
                     </div>
                   </Show>
 
+                  {/* Output Directory Selection */}
+                  <div class="space-y-1.5 pt-1">
+                    <div class="flex items-center justify-between">
+                      <label class="text-[11px] font-medium text-slate-300">
+                        {t("controls.outputDir")}
+                      </label>
+                      <button
+                        onClick={() => {
+                          const newDir = prompt("请输入输出保存目录路径（留空表示与原图同目录）：", customOutputDir() || "");
+                          if (newDir !== null) {
+                            const trimmed = newDir.trim();
+                            setCustomOutputDir(trimmed);
+                            setSettings((prev) => ({
+                              ...prev,
+                              outputDirectory: trimmed.length > 0 ? trimmed : null,
+                            }));
+                            saveSettings(settings());
+                          }
+                        }}
+                        class="text-[10px] text-sky-400 hover:text-sky-300 transition underline cursor-pointer"
+                      >
+                        {customOutputDir() ? t("controls.browseDir") : t("controls.customDir")}
+                      </button>
+                    </div>
+
+                    <div class="flex items-center space-x-1.5">
+                      <div
+                        class={`flex-1 flex items-center px-2.5 py-1.5 rounded-lg border text-xs font-mono truncate select-none ${
+                          customOutputDir()
+                            ? "bg-slate-800/90 text-sky-300 border-sky-600/60"
+                            : "bg-slate-800/40 text-slate-400 border-slate-700/60"
+                        }`}
+                        title={customOutputDir() || t("controls.sameAsInput")}
+                      >
+                        <span class="mr-1.5">📁</span>
+                        <span class="truncate">
+                          {customOutputDir() || t("controls.sameAsInput")}
+                        </span>
+                      </div>
+
+                      {customOutputDir() && (
+                        <button
+                          onClick={() => {
+                            setCustomOutputDir("");
+                            setSettings((prev) => ({
+                              ...prev,
+                              outputDirectory: null,
+                            }));
+                            saveSettings(settings());
+                          }}
+                          class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 rounded-lg border border-slate-700 text-xs transition"
+                          title={t("controls.resetDir")}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Overwrite Toggle */}
                   <div class="flex items-center justify-between pt-1">
                     <span class="text-[11px] text-slate-400 font-medium">{t("controls.overwriteExisting")}</span>
@@ -620,9 +760,9 @@ export const App: Component = () => {
 
           {/* Action Buttons */}
           <div class="space-y-2.5 pt-4 border-t border-slate-800 mt-4">
-            {queuedCount() > 0 && (
+            <Show when={jobs().length > 0}>
               <button
-                onClick={startProcessingQueue}
+                onClick={() => handleStartUpscale()}
                 disabled={isProcessingQueue()}
                 class={`w-full flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-bold text-xs shadow-lg transition ${
                   isProcessingQueue()
@@ -634,10 +774,12 @@ export const App: Component = () => {
                 <span>
                   {isProcessingQueue()
                     ? t("queue.processing")
-                    : `${t("controls.upscaleAll")} (${queuedCount()})`}
+                    : queuedCount() > 0
+                    ? `${t("controls.upscaleAll")} (${queuedCount()})`
+                    : "⚡ 开始放大当前图片 (Upscale)"}
                 </span>
               </button>
-            )}
+            </Show>
 
             <label class="w-full flex items-center justify-center space-x-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl cursor-pointer border border-slate-700 transition shadow-sm">
               <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
