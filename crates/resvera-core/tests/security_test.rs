@@ -4,7 +4,13 @@ use resvera_core::{format_output_filename, sanitize_filename_component};
 fn test_path_traversal_and_dos_device_name_sanitization() {
     // 1. Path traversal injection
     let attack_stem = "../../../etc/passwd";
-    let formatted = format_output_filename("{stem}_{model}_{scale}x", attack_stem, "realesrgan", 4, "png");
+    let formatted = format_output_filename(
+        "{stem}_{model}_{scale}x",
+        attack_stem,
+        "realesrgan",
+        4,
+        "png",
+    );
     assert!(!formatted.contains(".."));
     assert!(!formatted.contains("/"));
     assert!(!formatted.contains("\\"));
