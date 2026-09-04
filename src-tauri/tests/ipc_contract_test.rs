@@ -128,7 +128,7 @@ fn test_settings_transactional_failure_does_not_mutate_in_memory() {
     };
 
     let mut modified = initial.clone();
-    modified.theme = "custom-theme".into();
+    modified.theme = "light".into();
 
     let result = save_settings_impl(&state, modified);
     assert!(result.is_err());
@@ -144,6 +144,47 @@ fn test_path_validation_and_rejection() {
     assert!(validate_path("   ").is_err());
     assert!(validate_path("path/with/\0null").is_err());
     assert!(validate_path("non_existent_file_xyz.png").is_err());
+
+    assert!(validate_output_directory("path/with/\0null").is_err());
+}
+
+#[test]
+fn test_settings_security_validation() {
+    let invalid_settings = AppSettings {
+        schema_version: 999,
+        ..Default::default()
+    };
+    assert!(validate_settings(&invalid_settings).is_err());
+
+    let null_out = AppSettings {
+        output_directory: Some("/tmp/out\0side".into()),
+        ..Default::default()
+    };
+    assert!(validate_settings(&null_out).is_err());
+
+    let null_mod = AppSettings {
+        models_directory: Some("/tmp/models\0bad".into()),
+        ..Default::default()
+    };
+    assert!(validate_settings(&null_mod).is_err());
+
+    let empty_template = AppSettings {
+        naming_template: "".into(),
+        ..Default::default()
+    };
+    assert!(validate_settings(&empty_template).is_err());
+
+    let bad_metadata = AppSettings {
+        metadata_policy: "exploitInjectedPolicy".into(),
+        ..Default::default()
+    };
+    assert!(validate_settings(&bad_metadata).is_err());
+
+    let bad_theme = AppSettings {
+        theme: "<script>alert(1)</script>".into(),
+        ..Default::default()
+    };
+    assert!(validate_settings(&bad_theme).is_err());
 }
 
 #[test]
