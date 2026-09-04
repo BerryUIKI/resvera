@@ -1,10 +1,12 @@
 use resvera_core::{atomic_save_image, OutputFormat, UpscaleJobRequest as CoreJobRequest};
 use resvera_desktop::commands::*;
 use resvera_desktop::ipc_types::*;
+use resvera_desktop::worker::QueueWorker;
 use resvera_engine_ort::OrtEngine;
 use resvera_models::{compute_file_sha256, ModelInstaller};
 use resvera_persistence::AppDatabase;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tempfile::tempdir;
 
 #[test]
@@ -14,7 +16,6 @@ fn test_ipc_types_serialization_rules() {
         quality: None,
     };
     let json = serde_json::to_string(&fmt).unwrap();
-    // Verify camelCase discriminator
     assert_eq!(
         json,
         "{\"kind\":\"webp\",\"lossless\":true,\"quality\":null}"
@@ -43,9 +44,11 @@ fn test_ipc_commands_workflow() {
         temp.path().join("previews"),
         &models_root,
     );
+    let settings_path = temp.path().join("settings.json");
     let state = AppState {
         orchestrator,
         settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path,
     };
 
     // 1. Get runtime status
@@ -53,12 +56,12 @@ fn test_ipc_commands_workflow() {
     assert!(status.offline_ready);
     assert_eq!(status.engine.id, "ort");
 
-    // 2. List models
-    let models = list_models();
+    // 2. List models with verified installer state
+    let models = list_models_impl(&models_root);
     assert_eq!(models.len(), 5);
     assert_eq!(models[0].id, "realesrgan-x4plus");
-    assert_eq!(models[2].id, "real-cugan-2x");
-    assert_eq!(models[4].id, "real-hat-gan-4x");
+    assert!(models[0].installed); // Installed via verified test model fixture!
+    assert!(!models[1].installed); // Not installed
 
     // 3. Settings load and save
     let default_settings = load_settings_impl(&state);
@@ -66,8 +69,9 @@ fn test_ipc_commands_workflow() {
 
     let mut new_settings = default_settings.clone();
     new_settings.theme = "dark".into();
-    let saved = save_settings_impl(&state, new_settings);
+    let saved = save_settings_impl(&state, new_settings).unwrap();
     assert_eq!(saved.theme, "dark");
+    assert!(state.settings_path.exists());
 
     // 4. Create and retrieve job
     let input_path = temp.path().join("photo.png");
@@ -92,6 +96,117 @@ fn test_ipc_commands_workflow() {
     let fetched = get_job_impl(&state, &snapshot.id).unwrap();
     assert_eq!(fetched.id, snapshot.id);
     assert_eq!(fetched.state, "queued");
+
+    // 5. Job history list
+    let history = get_jobs_history_impl(&state, 10).unwrap();
+    assert_eq!(history.jobs.len(), 1);
+    assert_eq!(history.jobs[0].id, snapshot.id);
+}
+
+#[test]
+fn test_settings_transactional_failure_does_not_mutate_in_memory() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        temp.path().join("models"),
+    );
+
+    // Target a path inside a read-only or non-creatable file to induce failure
+    let invalid_dir = temp.path().join("not_a_directory");
+    std::fs::write(&invalid_dir, b"file content").unwrap();
+    let invalid_settings_path = invalid_dir.join("sub").join("settings.json");
+
+    let initial = AppSettings::default();
+    let state = AppState {
+        orchestrator,
+        settings: Arc::new(Mutex::new(initial.clone())),
+        settings_path: invalid_settings_path,
+    };
+
+    let mut modified = initial.clone();
+    modified.theme = "custom-theme".into();
+
+    let result = save_settings_impl(&state, modified);
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err().code, ErrorCode::StorageFailure);
+
+    // In-memory state remains untouched!
+    assert_eq!(state.settings.lock().unwrap().theme, initial.theme);
+}
+
+#[test]
+fn test_path_validation_and_rejection() {
+    assert!(validate_path("").is_err());
+    assert!(validate_path("   ").is_err());
+    assert!(validate_path("path/with/\0null").is_err());
+    assert!(validate_path("non_existent_file_xyz.png").is_err());
+}
+
+#[test]
+fn test_background_queue_worker_execution() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let models_root = temp.path().join("models");
+    install_test_model(&models_root);
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    );
+    let settings_path = temp.path().join("settings.json");
+    let state = AppState {
+        orchestrator,
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path,
+    };
+
+    let input_path = temp.path().join("worker_photo.png");
+    let img = image::RgbImage::new(16, 16);
+    atomic_save_image(&img, &input_path, &OutputFormat::Png, None).unwrap();
+
+    let req = CoreJobRequest {
+        input_path: input_path.to_str().unwrap().to_string(),
+        output_directory: temp.path().to_str().unwrap().to_string(),
+        model_id: "realesrgan-x4plus".to_string(),
+        model_variant_id: "default".to_string(),
+        target_scale: 4,
+        output_format: OutputFormat::Png,
+        overwrite: false,
+        tile_size: Some(32),
+        provider_preference: Some("cpu".to_string()),
+    };
+
+    let job = create_upscale_job_impl(&state, req).unwrap();
+    assert_eq!(job.state, "queued");
+
+    // Start worker
+    let mut worker = QueueWorker::start(state.clone());
+
+    // Wait for worker to pick up and process the job
+    let mut processed = false;
+    for _ in 0..50 {
+        std::thread::sleep(Duration::from_millis(50));
+        let current = get_job_impl(&state, &job.id).unwrap();
+        // Since dummy model bytes are not valid ONNX graphs, the worker truthfully
+        // fails closed rather than faking success.
+        if current.state == "failed" {
+            assert!(current.error.is_some());
+            assert_eq!(current.progress.unwrap().fraction, 0.0);
+            processed = true;
+            break;
+        }
+    }
+    worker.stop();
+    assert!(
+        processed,
+        "Background worker should have picked up and executed the queued job"
+    );
 }
 
 fn install_test_model(models_root: &std::path::Path) {

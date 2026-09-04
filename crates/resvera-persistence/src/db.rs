@@ -435,6 +435,51 @@ impl AppDatabase {
         )?;
         Ok(affected)
     }
+
+    /// Lists recent jobs up to the specified limit, ordered by creation time descending.
+    pub fn list_recent_jobs(&self, limit: usize) -> Result<Vec<JobRecord>, DatabaseError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, state, input_path, output_path, preview_path,
+                    model_id, model_package_version, model_variant_id, target_scale,
+                    engine_id, provider_id, progress_fraction, progress_stage,
+                    error_code, error_message, output_directory, output_format_json,
+                    overwrite, tile_size, created_at, updated_at
+             FROM jobs ORDER BY created_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |row| {
+            let overwrite_int: i64 = row.get(17)?;
+            Ok(JobRecord {
+                id: row.get(0)?,
+                state: row.get(1)?,
+                input_path: row.get(2)?,
+                output_path: row.get(3)?,
+                preview_path: row.get(4)?,
+                model_id: row.get(5)?,
+                model_package_version: row.get(6)?,
+                model_variant_id: row.get(7)?,
+                target_scale: row.get(8)?,
+                engine_id: row.get(9)?,
+                provider_id: row.get(10)?,
+                progress_fraction: row.get(11)?,
+                progress_stage: row.get(12)?,
+                error_code: row.get(13)?,
+                error_message: row.get(14)?,
+                output_directory: row.get(15)?,
+                output_format_json: row.get(16)?,
+                overwrite: overwrite_int != 0,
+                tile_size: row.get(18)?,
+                created_at: row.get(19)?,
+                updated_at: row.get(20)?,
+            })
+        })?;
+
+        let mut jobs = Vec::new();
+        for job_res in rows {
+            jobs.push(job_res?);
+        }
+        Ok(jobs)
+    }
 }
 
 fn migrate_job_columns(conn: &Connection) -> Result<(), DatabaseError> {
@@ -620,5 +665,19 @@ mod tests {
         job.output_format_json = Some(r#"{"kind":"png"}"#.into());
         db.insert_job(&job).unwrap();
         assert_eq!(db.get_job("migrated").unwrap(), Some(job));
+    }
+
+    #[test]
+    fn test_list_recent_jobs() {
+        let db = AppDatabase::new_in_memory().unwrap();
+        let j1 = make_sample_job("job-alpha", "queued");
+        let j2 = make_sample_job("job-beta", "succeeded");
+        db.insert_job(&j1).unwrap();
+        db.insert_job(&j2).unwrap();
+
+        let list = db.list_recent_jobs(10).unwrap();
+        assert_eq!(list.len(), 2);
+        let list_limited = db.list_recent_jobs(1).unwrap();
+        assert_eq!(list_limited.len(), 1);
     }
 }
