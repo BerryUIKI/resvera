@@ -1,4 +1,4 @@
-import { Component, Show, createSignal } from "solid-js";
+import { Component, Show, createSignal, createEffect } from "solid-js";
 import { AppSettings } from "../types/ipc";
 import { Locale, useI18n } from "../i18n";
 
@@ -12,6 +12,18 @@ interface SettingsModalProps {
 export const SettingsModal: Component<SettingsModalProps> = (props) => {
   const { t, locale, setLocale } = useI18n();
   const [activeTab, setActiveTab] = createSignal<"general" | "storage" | "engine">("general");
+  const [draft, setDraft] = createSignal<AppSettings>(props.settings);
+
+  createEffect(() => {
+    if (props.isOpen) {
+      setDraft({ ...props.settings });
+    }
+  });
+
+  const handleSave = () => {
+    props.onSave(draft());
+    props.onClose();
+  };
 
   return (
     <Show when={props.isOpen}>
@@ -42,7 +54,7 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                   : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
               }`}
             >
-              🌐 基础与界面 (General)
+              {t("settings.tabGeneral")}
             </button>
             <button
               onClick={() => setActiveTab("storage")}
@@ -52,7 +64,7 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                   : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
               }`}
             >
-              📂 模型与存储路径 (Storage)
+              {t("settings.tabStorage")}
             </button>
             <button
               onClick={() => setActiveTab("engine")}
@@ -62,7 +74,7 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                   : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
               }`}
             >
-              ⚡ 推理引擎与分块 (Engine & Tiling)
+              {t("settings.tabEngine")}
             </button>
           </div>
 
@@ -72,14 +84,14 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
               <div>
                 <label class="block font-medium mb-1 text-slate-400">{t("settings.language")}</label>
                 <select
-                  value={locale()}
+                  value={draft().locale || locale()}
                   onChange={(e) => {
                     const newLoc = e.currentTarget.value as Locale;
                     setLocale(newLoc);
-                    props.onSave({
-                      ...props.settings,
+                    setDraft((prev) => ({
+                      ...prev,
                       locale: newLoc,
-                    });
+                    }));
                   }}
                   class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                 >
@@ -91,12 +103,12 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
               <div>
                 <label class="block font-medium mb-1 text-slate-400">{t("settings.theme")}</label>
                 <select
-                  value={props.settings.theme}
+                  value={draft().theme}
                   onChange={(e) =>
-                    props.onSave({
-                      ...props.settings,
+                    setDraft((prev) => ({
+                      ...prev,
                       theme: e.currentTarget.value as "dark" | "light" | "system",
-                    })
+                    }))
                   }
                   class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                 >
@@ -110,12 +122,12 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                 <label class="block font-medium mb-1 text-slate-400">{t("settings.namingTemplate")}</label>
                 <input
                   type="text"
-                  value={props.settings.namingTemplate}
+                  value={draft().namingTemplate}
                   onInput={(e) =>
-                    props.onSave({
-                      ...props.settings,
+                    setDraft((prev) => ({
+                      ...prev,
                       namingTemplate: e.currentTarget.value,
-                    })
+                    }))
                   }
                   class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-sky-500"
                   placeholder="{stem}_{model}_{scale}x"
@@ -126,12 +138,12 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
               <div>
                 <label class="block font-medium mb-1 text-slate-400">{t("settings.metadataPolicy")}</label>
                 <select
-                  value={props.settings.metadataPolicy}
+                  value={draft().metadataPolicy}
                   onChange={(e) =>
-                    props.onSave({
-                      ...props.settings,
+                    setDraft((prev) => ({
+                      ...prev,
                       metadataPolicy: e.currentTarget.value as "strip" | "preserveSafe",
-                    })
+                    }))
                   }
                   class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                 >
@@ -146,12 +158,12 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                 </div>
                 <input
                   type="checkbox"
-                  checked={props.settings.preserveGps}
+                  checked={draft().preserveGps}
                   onChange={(e) =>
-                    props.onSave({
-                      ...props.settings,
+                    setDraft((prev) => ({
+                      ...prev,
                       preserveGps: e.currentTarget.checked,
-                    })
+                    }))
                   }
                   class="w-4 h-4 rounded accent-sky-500"
                 />
@@ -169,24 +181,24 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                   <div class="flex items-center space-x-2">
                     <input
                       type="text"
-                      value={props.settings.modelsDirectory || "~/.resvera/models"}
+                      value={draft().modelsDirectory || "~/.resvera/models"}
                       onInput={(e) =>
-                        props.onSave({
-                          ...props.settings,
+                        setDraft((prev) => ({
+                          ...prev,
                           modelsDirectory: e.currentTarget.value,
-                        })
+                        }))
                       }
                       class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-sky-500"
                       placeholder="C:\Users\Username\.resvera\models"
                     />
                     <button
                       onClick={() => {
-                        const newPath = prompt("Enter new Models Storage Directory path:", props.settings.modelsDirectory || "C:\\resvera\\models");
+                        const newPath = prompt("Enter new Models Storage Directory path:", draft().modelsDirectory || "C:\\resvera\\models");
                         if (newPath) {
-                          props.onSave({
-                            ...props.settings,
+                          setDraft((prev) => ({
+                            ...prev,
                             modelsDirectory: newPath,
-                          });
+                          }));
                         }
                       }}
                       class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 text-xs font-semibold transition"
@@ -198,40 +210,57 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                 </div>
 
                 <div>
-                  <label class="block font-medium mb-1 text-slate-300">{t("settings.outputDir")}</label>
+                  <label class="block font-medium mb-1 text-slate-300 flex items-center justify-between">
+                    <span>{t("settings.outputDir")}</span>
+                    <span class="text-[10px] text-slate-400 font-normal">留空即默认与原图同目录</span>
+                  </label>
                   <div class="flex items-center space-x-2">
                     <input
                       type="text"
-                      value={props.settings.outputDirectory || "Same as input directory (与原图同目录)"}
+                      value={draft().outputDirectory || ""}
                       onInput={(e) =>
-                        props.onSave({
-                          ...props.settings,
-                          outputDirectory: e.currentTarget.value,
-                        })
+                        setDraft((prev) => ({
+                          ...prev,
+                          outputDirectory: e.currentTarget.value.trim().length > 0 ? e.currentTarget.value : null,
+                        }))
                       }
                       class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-sky-500"
-                      placeholder="Same as input image directory"
+                      placeholder="与原图片存放在同一文件夹 (Same as input image directory)"
                     />
                     <button
                       onClick={() => {
-                        const newPath = prompt("Enter Default Output Directory path (or empty for same as input):", "");
+                        const newPath = prompt("请输入输出保存目录路径（留空表示与原图同目录）：", draft().outputDirectory || "");
                         if (newPath !== null) {
-                          props.onSave({
-                            ...props.settings,
-                            outputDirectory: newPath.trim().length > 0 ? newPath : null,
-                          });
+                          setDraft((prev) => ({
+                            ...prev,
+                            outputDirectory: newPath.trim().length > 0 ? newPath.trim() : null,
+                          }));
                         }
                       }}
                       class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 text-xs font-semibold transition"
                     >
                       {t("settings.browse")}
                     </button>
+                    {draft().outputDirectory && (
+                      <button
+                        onClick={() =>
+                          setDraft((prev) => ({
+                            ...prev,
+                            outputDirectory: null,
+                          }))
+                        }
+                        class="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 rounded-lg border border-slate-700 text-xs transition"
+                        title="清空"
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
                 </div>
 
                 <div class="bg-slate-800/60 p-3 rounded-xl border border-slate-700/60 space-y-1 text-[11px] text-slate-400">
-                  <div class="font-semibold text-slate-200">🛡️ 存储与离线完整性保障</div>
-                  <div>模型下载时严格执行 Ed25519 密码学签名验签与分块 SHA-256 哈希比对。若校验失败或中断，系统将自动回滚，绝不破坏现有可用模型。</div>
+                  <div class="font-semibold text-slate-200">{t("settings.storageSecurityNote")}</div>
+                  <div>{t("settings.storageSecurityDesc")}</div>
                 </div>
               </div>
             </Show>
@@ -242,13 +271,13 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                 <div>
                   <label class="block font-medium mb-1 text-slate-300">{t("controls.provider")}</label>
                   <select
-                    value={props.settings.providerPreference.kind === "specific" ? props.settings.providerPreference.providerId : "automatic"}
+                    value={draft().providerPreference.kind === "specific" ? (draft().providerPreference as { kind: "specific"; providerId: string }).providerId : "automatic"}
                     onChange={(e) => {
                       const val = e.currentTarget.value;
-                      props.onSave({
-                        ...props.settings,
+                      setDraft((prev) => ({
+                        ...prev,
                         providerPreference: val === "automatic" ? { kind: "automatic" } : { kind: "specific", providerId: val },
-                      });
+                      }));
                     }}
                     class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                   >
@@ -264,30 +293,30 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                   <div>
                     <label class="block font-medium mb-1 text-slate-300">{t("controls.precision")}</label>
                     <select
-                      value={props.settings.precision || "fp32"}
+                      value={draft().precision || "fp32"}
                       onChange={(e) =>
-                        props.onSave({
-                          ...props.settings,
+                        setDraft((prev) => ({
+                          ...prev,
                           precision: e.currentTarget.value as "fp32" | "fp16",
-                        })
+                        }))
                       }
                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                     >
-                      <option value="fp32">FP32 (Full Precision - 最高精度)</option>
-                      <option value="fp16">FP16 (Half Precision - 速度更快，显存减半)</option>
+                      <option value="fp32">{t("settings.fp32")}</option>
+                      <option value="fp16">{t("settings.fp16")}</option>
                     </select>
                   </div>
 
                   <div>
                     <label class="block font-medium mb-1 text-slate-300">{t("controls.tileSize")}</label>
                     <select
-                      value={props.settings.tileSizeOverride?.toString() || "auto"}
+                      value={draft().tileSizeOverride?.toString() || "auto"}
                       onChange={(e) => {
                         const val = e.currentTarget.value;
-                        props.onSave({
-                          ...props.settings,
+                        setDraft((prev) => ({
+                          ...prev,
                           tileSizeOverride: val === "auto" ? null : Number(val),
-                        });
+                        }));
                       }}
                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                     >
@@ -304,12 +333,12 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                   <div>
                     <label class="block font-medium mb-1 text-slate-300">{t("controls.tileOverlap")}</label>
                     <select
-                      value={props.settings.tileOverlap?.toString() || "16"}
+                      value={draft().tileOverlap?.toString() || "16"}
                       onChange={(e) =>
-                        props.onSave({
-                          ...props.settings,
+                        setDraft((prev) => ({
+                          ...prev,
                           tileOverlap: Number(e.currentTarget.value),
-                        })
+                        }))
                       }
                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                     >
@@ -322,17 +351,17 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                   <div>
                     <label class="block font-medium mb-1 text-slate-300">{t("controls.blendMode")}</label>
                     <select
-                      value={props.settings.blendMode || "cosine"}
+                      value={draft().blendMode || "cosine"}
                       onChange={(e) =>
-                        props.onSave({
-                          ...props.settings,
+                        setDraft((prev) => ({
+                          ...prev,
                           blendMode: e.currentTarget.value,
-                        })
+                        }))
                       }
                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                     >
-                      <option value="cosine">余弦羽化权重 (Cosine Feathering - 推荐)</option>
-                      <option value="linear">线性渐变权重 (Linear Blending)</option>
+                      <option value="cosine">{t("settings.cosineFeathering")}</option>
+                      <option value="linear">{t("settings.linearBlending")}</option>
                     </select>
                   </div>
                 </div>
@@ -346,7 +375,7 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
 
           <div class="flex justify-end pt-3 border-t border-slate-800">
             <button
-              onClick={props.onClose}
+              onClick={handleSave}
               class="px-5 py-2 text-xs font-semibold bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-xl transition shadow-lg shadow-sky-500/20"
             >
               {t("settings.save")}

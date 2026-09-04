@@ -7,6 +7,7 @@ interface QueueListProps {
   selectedJobId: string | null;
   onSelectJob: (id: string) => void;
   onCancelJob: (id: string) => void;
+  onStartJob?: (id: string) => void;
   isPaused: boolean;
   onTogglePause: () => void;
 }
@@ -67,15 +68,27 @@ export const QueueList: Component<QueueListProps> = (props) => {
                 </div>
               </div>
 
-              <div class="flex items-center space-x-2">
+              <div class="flex items-center space-x-1.5">
                 {getStatusBadge(job.state)}
+                {job.state !== "running" && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      props.onStartJob?.(job.id);
+                    }}
+                    class="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/60 p-1 rounded transition text-xs"
+                    title="放大此图片 (Upscale)"
+                  >
+                    ▶
+                  </button>
+                )}
                 {(job.state === "queued" || job.state === "running") && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       props.onCancelJob(job.id);
                     }}
-                    class="text-slate-500 hover:text-rose-400 p-1"
+                    class="text-slate-500 hover:text-rose-400 hover:bg-rose-950/60 p-1 rounded transition text-xs"
                     title={t("queue.cancel")}
                   >
                     ✕

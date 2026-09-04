@@ -1,4 +1,4 @@
-import { Component, For, Show, createSignal } from "solid-js";
+import { Component, For, Show } from "solid-js";
 import { ModelSummary } from "../types/ipc";
 import { useI18n } from "../i18n";
 
@@ -13,23 +13,9 @@ interface ModelCenterModalProps {
 
 export const ModelCenterModal: Component<ModelCenterModalProps> = (props) => {
   const { t } = useI18n();
-  const [downloadingId, setDownloadingId] = createSignal<string | null>(null);
-  const [progress, setProgress] = createSignal(0);
 
-  const handleInstall = (modelId: string) => {
-    setDownloadingId(modelId);
-    setProgress(15);
-    const interval = setInterval(() => {
-      setProgress((p) => {
-        if (p >= 100) {
-          clearInterval(interval);
-          setDownloadingId(null);
-          props.onToggleInstall?.(modelId);
-          return 0;
-        }
-        return p + 25;
-      });
-    }, 200);
+  const handleInstall = (_modelId: string) => {
+    alert(t("modelCenter.offlineInstallationNote"));
   };
 
   return (
@@ -105,12 +91,7 @@ export const ModelCenterModal: Component<ModelCenterModalProps> = (props) => {
                   </div>
 
                   <div class="flex items-center space-x-2">
-                    {downloadingId() === model.id ? (
-                      <div class="flex items-center space-x-2 bg-slate-800 px-3 py-1.5 rounded-lg border border-sky-500/50">
-                        <span class="w-3 h-3 border-2 border-sky-400 border-t-transparent rounded-full animate-spin"></span>
-                        <span class="text-xs text-sky-400 font-mono">{progress()}%</span>
-                      </div>
-                    ) : model.installed ? (
+                    {model.installed ? (
                       <div class="flex items-center space-x-2">
                         <span class="px-3 py-1 text-xs font-semibold rounded-lg bg-emerald-900/60 text-emerald-300 border border-emerald-700/60">
                           ✓ {t("modelCenter.installed")}
