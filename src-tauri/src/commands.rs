@@ -658,6 +658,39 @@ pub fn validate_settings(settings: &AppSettings) -> Result<(), ApiError> {
         }
     }
 
+    if settings.naming_template.contains('\0') || settings.naming_template.trim().is_empty() {
+        return Err(ApiError {
+            code: ErrorCode::InvalidArgument,
+            message: "Naming template cannot be empty or contain null bytes".into(),
+            details: None,
+            retryable: false,
+        });
+    }
+
+    match settings.metadata_policy.as_str() {
+        "preserveSafe" | "stripAll" | "preserveAll" => {}
+        _ => {
+            return Err(ApiError {
+                code: ErrorCode::InvalidArgument,
+                message: format!("Unsupported metadata policy: {}", settings.metadata_policy),
+                details: None,
+                retryable: false,
+            });
+        }
+    }
+
+    match settings.theme.as_str() {
+        "dark" | "light" | "system" => {}
+        _ => {
+            return Err(ApiError {
+                code: ErrorCode::InvalidArgument,
+                message: format!("Unsupported theme: {}", settings.theme),
+                details: None,
+                retryable: false,
+            });
+        }
+    }
+
     Ok(())
 }
 

@@ -22,17 +22,18 @@ pub struct DiagnosticCollector;
 impl DiagnosticCollector {
     /// Redacts user paths and username occurrences in log lines.
     pub fn sanitize_path(input: &str) -> String {
-        let mut sanitized = input.to_string();
+        use std::sync::OnceLock;
 
-        // 1. Windows user directories: C:\Users\<username>\...
-        let windows_user_pattern = regex::Regex::new(r"(?i)[a-z]:\\users\\[^\\]+").unwrap();
-        sanitized = windows_user_pattern.replace_all(&sanitized, "<USER_DIR>").into_owned();
+        static WINDOWS_USER_PATTERN: OnceLock<regex::Regex> = OnceLock::new();
+        static UNIX_USER_PATTERN: OnceLock<regex::Regex> = OnceLock::new();
 
-        // 2. Unix / Linux / macOS user directories: /home/<username> or /Users/<username>
-        let unix_user_pattern = regex::Regex::new(r"/(home|Users)/[^/\s]+").unwrap();
-        sanitized = unix_user_pattern.replace_all(&sanitized, "<USER_DIR>").into_owned();
+        let win_pat = WINDOWS_USER_PATTERN
+            .get_or_init(|| regex::Regex::new(r"(?i)[a-z]:\\users\\[^\\]+").unwrap());
+        let unix_pat =
+            UNIX_USER_PATTERN.get_or_init(|| regex::Regex::new(r"/(home|Users)/[^/\s]+").unwrap());
 
-        sanitized
+        let sanitized = win_pat.replace_all(input, "<USER_DIR>");
+        unix_pat.replace_all(&sanitized, "<USER_DIR>").into_owned()
     }
 
     pub fn generate_report(
