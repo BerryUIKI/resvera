@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection, OptionalExtension, Result, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -31,6 +31,10 @@ pub struct JobRecord {
     pub progress_stage: String,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
+    pub output_directory: Option<String>,
+    pub output_format_json: Option<String>,
+    pub overwrite: bool,
+    pub tile_size: Option<u32>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -85,6 +89,10 @@ impl AppDatabase {
                 progress_stage TEXT NOT NULL DEFAULT 'preparing',
                 error_code TEXT,
                 error_message TEXT,
+                output_directory TEXT,
+                output_format_json TEXT,
+                overwrite INTEGER NOT NULL DEFAULT 0,
+                tile_size INTEGER,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -99,6 +107,7 @@ impl AppDatabase {
             );
             ",
         )?;
+        migrate_job_columns(&conn)?;
         Ok(())
     }
 
@@ -109,8 +118,9 @@ impl AppDatabase {
                 id, state, input_path, output_path, preview_path,
                 model_id, model_package_version, model_variant_id, target_scale,
                 engine_id, provider_id, progress_fraction, progress_stage,
-                error_code, error_message, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                error_code, error_message, output_directory, output_format_json,
+                overwrite, tile_size, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             params![
                 job.id,
                 job.state,
@@ -127,6 +137,10 @@ impl AppDatabase {
                 job.progress_stage,
                 job.error_code,
                 job.error_message,
+                job.output_directory,
+                job.output_format_json,
+                if job.overwrite { 1 } else { 0 },
+                job.tile_size,
                 job.created_at,
                 job.updated_at
             ],
@@ -143,8 +157,9 @@ impl AppDatabase {
                     id, state, input_path, output_path, preview_path,
                     model_id, model_package_version, model_variant_id, target_scale,
                     engine_id, provider_id, progress_fraction, progress_stage,
-                    error_code, error_message, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                    error_code, error_message, output_directory, output_format_json,
+                    overwrite, tile_size, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             )?;
             for job in jobs {
                 stmt.execute(params![
@@ -163,6 +178,10 @@ impl AppDatabase {
                     job.progress_stage,
                     job.error_code,
                     job.error_message,
+                    job.output_directory,
+                    job.output_format_json,
+                    if job.overwrite { 1 } else { 0 },
+                    job.tile_size,
                     job.created_at,
                     job.updated_at
                 ])?;
@@ -172,14 +191,87 @@ impl AppDatabase {
         Ok(())
     }
 
-    pub fn update_job_state(&self, id: &str, state: &str) -> Result<(), DatabaseError> {
+    pub fn transition_job_state(
+        &self,
+        id: &str,
+        expected_state: &str,
+        next_state: &str,
+    ) -> Result<bool, DatabaseError> {
         let conn = self.conn.lock().unwrap();
         let now = chrono::Utc::now().to_rfc3339();
-        conn.execute(
-            "UPDATE jobs SET state = ?1, updated_at = ?2 WHERE id = ?3",
-            params![state, now, id],
+        let affected = conn.execute(
+            "UPDATE jobs SET state = ?1, progress_stage = ?1, updated_at = ?2
+             WHERE id = ?3 AND state = ?4",
+            params![next_state, now, id, expected_state],
         )?;
-        Ok(())
+        Ok(affected == 1)
+    }
+
+    /// Atomically claims the oldest queued job. The state transition and selection happen in
+    /// one immediate transaction, so multiple workers cannot execute the same job.
+    pub fn claim_next_queued_job(&self) -> Result<Option<JobRecord>, DatabaseError> {
+        let claimed_id = {
+            let mut conn = self.conn.lock().unwrap();
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let next_id: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM jobs WHERE state = 'queued' ORDER BY created_at ASC, id ASC LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()?;
+
+            let Some(next_id) = next_id else {
+                tx.commit()?;
+                return Ok(None);
+            };
+            let now = chrono::Utc::now().to_rfc3339();
+            let affected = tx.execute(
+                "UPDATE jobs SET state = 'preparing', progress_stage = 'preparing', updated_at = ?1
+                 WHERE id = ?2 AND state = 'queued'",
+                params![now, next_id],
+            )?;
+            if affected != 1 {
+                return Err(DatabaseError::Constraint(format!(
+                    "Failed to claim queued job {next_id}"
+                )));
+            }
+            tx.commit()?;
+            next_id
+        };
+
+        self.get_job(&claimed_id)
+    }
+
+    /// Marks a non-terminal job as cancelled. Returns false when the job is already terminal or
+    /// does not exist.
+    pub fn cancel_job(&self, id: &str) -> Result<bool, DatabaseError> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let affected = conn.execute(
+            "UPDATE jobs SET state = 'cancelled', progress_stage = 'cancelled', updated_at = ?1
+             WHERE id = ?2 AND state IN ('queued', 'preparing', 'running', 'finalizing')",
+            params![now, id],
+        )?;
+        Ok(affected == 1)
+    }
+
+    pub fn update_job_failure(
+        &self,
+        id: &str,
+        error_code: &str,
+        error_message: &str,
+    ) -> Result<bool, DatabaseError> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let affected = conn.execute(
+            "UPDATE jobs
+             SET state = 'failed', progress_stage = 'failed', error_code = ?1,
+                 error_message = ?2, updated_at = ?3
+             WHERE id = ?4 AND state IN ('preparing', 'running', 'finalizing')",
+            params![error_code, error_message, now, id],
+        )?;
+        Ok(affected == 1)
     }
 
     pub fn get_job(&self, id: &str) -> Result<Option<JobRecord>, DatabaseError> {
@@ -188,11 +280,13 @@ impl AppDatabase {
             "SELECT id, state, input_path, output_path, preview_path,
                     model_id, model_package_version, model_variant_id, target_scale,
                     engine_id, provider_id, progress_fraction, progress_stage,
-                    error_code, error_message, created_at, updated_at
+                    error_code, error_message, output_directory, output_format_json,
+                    overwrite, tile_size, created_at, updated_at
              FROM jobs WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
+            let overwrite_int: i64 = row.get(17)?;
             Ok(Some(JobRecord {
                 id: row.get(0)?,
                 state: row.get(1)?,
@@ -209,8 +303,12 @@ impl AppDatabase {
                 progress_stage: row.get(12)?,
                 error_code: row.get(13)?,
                 error_message: row.get(14)?,
-                created_at: row.get(15)?,
-                updated_at: row.get(16)?,
+                output_directory: row.get(15)?,
+                output_format_json: row.get(16)?,
+                overwrite: overwrite_int != 0,
+                tile_size: row.get(18)?,
+                created_at: row.get(19)?,
+                updated_at: row.get(20)?,
             }))
         } else {
             Ok(None)
@@ -223,11 +321,13 @@ impl AppDatabase {
             "SELECT id, state, input_path, output_path, preview_path,
                     model_id, model_package_version, model_variant_id, target_scale,
                     engine_id, provider_id, progress_fraction, progress_stage,
-                    error_code, error_message, created_at, updated_at
+                    error_code, error_message, output_directory, output_format_json,
+                    overwrite, tile_size, created_at, updated_at
              FROM jobs WHERE state = ?1 ORDER BY created_at ASC LIMIT 1",
         )?;
         let mut rows = stmt.query(params![state])?;
         if let Some(row) = rows.next()? {
+            let overwrite_int: i64 = row.get(17)?;
             Ok(Some(JobRecord {
                 id: row.get(0)?,
                 state: row.get(1)?,
@@ -244,12 +344,58 @@ impl AppDatabase {
                 progress_stage: row.get(12)?,
                 error_code: row.get(13)?,
                 error_message: row.get(14)?,
-                created_at: row.get(15)?,
-                updated_at: row.get(16)?,
+                output_directory: row.get(15)?,
+                output_format_json: row.get(16)?,
+                overwrite: overwrite_int != 0,
+                tile_size: row.get(18)?,
+                created_at: row.get(19)?,
+                updated_at: row.get(20)?,
             }))
         } else {
             Ok(None)
         }
+    }
+
+    pub fn update_job_progress(
+        &self,
+        id: &str,
+        fraction: f32,
+        stage: &str,
+    ) -> Result<bool, DatabaseError> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let affected = conn.execute(
+            "UPDATE jobs
+             SET progress_fraction = ?1, progress_stage = ?2, updated_at = ?3
+             WHERE id = ?4 AND state = 'running'",
+            params![fraction, stage, now, id],
+        )?;
+        Ok(affected == 1)
+    }
+
+    pub fn get_active_job_id(&self) -> Result<Option<String>, DatabaseError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id FROM jobs WHERE state IN ('preparing', 'running', 'finalizing') ORDER BY updated_at DESC LIMIT 1",
+        )?;
+        let mut rows = stmt.query([])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn get_queued_job_ids(&self) -> Result<Vec<String>, DatabaseError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt =
+            conn.prepare("SELECT id FROM jobs WHERE state = 'queued' ORDER BY created_at ASC")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        let mut ids = Vec::new();
+        for id_res in rows {
+            ids.push(id_res?);
+        }
+        Ok(ids)
     }
 
     pub fn update_job_success(
@@ -260,13 +406,18 @@ impl AppDatabase {
     ) -> Result<(), DatabaseError> {
         let conn = self.conn.lock().unwrap();
         let now = chrono::Utc::now().to_rfc3339();
-        conn.execute(
-            "UPDATE jobs 
-             SET state = 'succeeded', output_path = ?1, preview_path = ?2, 
-                 progress_fraction = 1.0, progress_stage = 'finalizing', updated_at = ?3 
-             WHERE id = ?4",
+        let affected = conn.execute(
+            "UPDATE jobs
+             SET state = 'succeeded', output_path = ?1, preview_path = ?2,
+                 progress_fraction = 1.0, progress_stage = 'succeeded', updated_at = ?3
+             WHERE id = ?4 AND state = 'finalizing'",
             params![output_path, preview_path, now, id],
         )?;
+        if affected != 1 {
+            return Err(DatabaseError::Constraint(format!(
+                "Job {id} was no longer finalizing when completion was committed"
+            )));
+        }
         Ok(())
     }
 
@@ -286,9 +437,31 @@ impl AppDatabase {
     }
 }
 
+fn migrate_job_columns(conn: &Connection) -> Result<(), DatabaseError> {
+    let mut stmt = conn.prepare("PRAGMA table_info(jobs)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
+    drop(stmt);
+
+    for (name, definition) in [
+        ("output_directory", "output_directory TEXT"),
+        ("output_format_json", "output_format_json TEXT"),
+        ("overwrite", "overwrite INTEGER NOT NULL DEFAULT 0"),
+        ("tile_size", "tile_size INTEGER"),
+    ] {
+        if !columns.contains(name) {
+            conn.execute_batch(&format!("ALTER TABLE jobs ADD COLUMN {definition}"))?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Barrier};
+    use tempfile::tempdir;
 
     fn make_sample_job(id: &str, state: &str) -> JobRecord {
         let now = chrono::Utc::now().to_rfc3339();
@@ -308,6 +481,10 @@ mod tests {
             progress_stage: "preparing".to_string(),
             error_code: None,
             error_message: None,
+            output_directory: None,
+            output_format_json: None,
+            overwrite: false,
+            tile_size: None,
             created_at: now.clone(),
             updated_at: now,
         }
@@ -356,5 +533,92 @@ mod tests {
         assert_eq!(db.get_job("j-succ").unwrap().unwrap().state, "succeeded");
         assert_eq!(db.get_job("j-fail").unwrap().unwrap().state, "failed");
         assert_eq!(db.get_job("j-cancel").unwrap().unwrap().state, "cancelled");
+    }
+
+    #[test]
+    fn claims_are_atomic_across_database_connections() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("queue.sqlite3");
+        let writer = AppDatabase::open(&db_path).unwrap();
+        writer
+            .insert_batch_jobs(&[
+                make_sample_job("job-1", "queued"),
+                make_sample_job("job-2", "queued"),
+            ])
+            .unwrap();
+
+        let barrier = Arc::new(Barrier::new(3));
+        let workers: Vec<_> = (0..2)
+            .map(|_| {
+                let path = db_path.clone();
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    let db = AppDatabase::open(path).unwrap();
+                    barrier.wait();
+                    db.claim_next_queued_job().unwrap().unwrap().id
+                })
+            })
+            .collect();
+        barrier.wait();
+
+        let mut claimed: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect();
+        claimed.sort();
+        assert_eq!(claimed, vec!["job-1", "job-2"]);
+        assert!(writer.get_queued_job_ids().unwrap().is_empty());
+    }
+
+    #[test]
+    fn terminal_states_cannot_be_overwritten() {
+        let db = AppDatabase::new_in_memory().unwrap();
+        db.insert_job(&make_sample_job("job", "running")).unwrap();
+
+        assert!(db.cancel_job("job").unwrap());
+        assert!(!db.update_job_progress("job", 0.5, "inference").unwrap());
+        assert!(!db
+            .update_job_failure("job", "lateFailure", "too late")
+            .unwrap());
+        assert!(db.update_job_success("job", "output", "preview").is_err());
+        assert!(!db.cancel_job("job").unwrap());
+        assert_eq!(db.get_job("job").unwrap().unwrap().state, "cancelled");
+    }
+
+    #[test]
+    fn opens_and_migrates_legacy_job_databases() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("legacy.sqlite3");
+        let legacy = Connection::open(&db_path).unwrap();
+        legacy
+            .execute_batch(
+                "CREATE TABLE jobs (
+                    id TEXT PRIMARY KEY,
+                    state TEXT NOT NULL,
+                    input_path TEXT NOT NULL,
+                    output_path TEXT,
+                    preview_path TEXT,
+                    model_id TEXT NOT NULL,
+                    model_package_version TEXT NOT NULL,
+                    model_variant_id TEXT NOT NULL,
+                    target_scale INTEGER NOT NULL,
+                    engine_id TEXT NOT NULL,
+                    provider_id TEXT,
+                    progress_fraction REAL NOT NULL DEFAULT 0.0,
+                    progress_stage TEXT NOT NULL DEFAULT 'preparing',
+                    error_code TEXT,
+                    error_message TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );",
+            )
+            .unwrap();
+        drop(legacy);
+
+        let db = AppDatabase::open(&db_path).unwrap();
+        let mut job = make_sample_job("migrated", "queued");
+        job.output_format_json = Some(r#"{"kind":"png"}"#.into());
+        db.insert_job(&job).unwrap();
+        assert_eq!(db.get_job("migrated").unwrap(), Some(job));
     }
 }

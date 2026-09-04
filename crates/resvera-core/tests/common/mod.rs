@@ -2,9 +2,92 @@ use resvera_core::{
     CancellationToken, EngineCapabilities, EngineError, EngineHealth, EngineId, InferenceEngine,
     ModelSession, OwnedTensor, TensorView,
 };
+use resvera_models::{
+    compute_file_sha256, ArtifactEntry, CompatibilitySpec, LicenseSpec, ModelInstaller,
+    ModelManifest, ModelVariant, ProvenanceSpec, TensorSpec, TilingSpec,
+};
 use std::any::Any;
+use std::path::Path;
 
 pub struct MockEngine;
+
+#[allow(dead_code)]
+pub fn install_mock_model(models_root: &Path, model_id: &str, native_scale: u32) {
+    let stage_dir = models_root.join(format!(".test-stage-{model_id}"));
+    let artifacts_dir = stage_dir.join("artifacts");
+    std::fs::create_dir_all(&artifacts_dir).unwrap();
+    let artifact_path = artifacts_dir.join("model.onnx");
+    let model_bytes = if native_scale == 2 {
+        b"verified-2x-model".as_slice()
+    } else {
+        b"verified-4x-model".as_slice()
+    };
+    std::fs::write(&artifact_path, model_bytes).unwrap();
+    let artifact_hash = compute_file_sha256(&artifact_path).unwrap();
+    let manifest = ModelManifest {
+        schema_version: 1,
+        id: model_id.into(),
+        package_version: "1.0.0".into(),
+        display_name: "Test model".into(),
+        family: "rrdb".into(),
+        category: "test".into(),
+        description: "Deterministic integration-test model".into(),
+        license: LicenseSpec {
+            spdx: "MIT".into(),
+            upstream_url: "https://example.invalid/test-model".into(),
+            redistribution_review: "test-only".into(),
+        },
+        provenance: ProvenanceSpec {
+            upstream_repository: "https://example.invalid/test-model".into(),
+            upstream_revision: "test".into(),
+            source_weight_name: "test".into(),
+            source_weight_sha256: "0".repeat(64),
+            export_recipe: "test".into(),
+        },
+        variants: vec![ModelVariant {
+            id: "default".into(),
+            native_scale,
+            strength: None,
+            artifact: "artifacts/model.onnx".into(),
+        }],
+        tensor: TensorSpec {
+            input_name: "input".into(),
+            output_name: "output".into(),
+            layout: "NCHW".into(),
+            channels: "RGB".into(),
+            input_range: [0.0, 1.0],
+            output_range: [0.0, 1.0],
+            element_type: "float32".into(),
+        },
+        tiling: TilingSpec {
+            alignment: 1,
+            minimum: 1,
+            recommended: 16,
+            overlap: 0,
+            window_size: None,
+            static_shapes_required: false,
+        },
+        compatibility: CompatibilitySpec {
+            engine: "onnx-runtime".into(),
+            minimum_engine_version: "1.28.0".into(),
+            validated_providers: vec!["cpu".into()],
+            validated_precisions: vec!["fp32".into()],
+        },
+        artifacts: vec![ArtifactEntry {
+            path: "artifacts/model.onnx".into(),
+            size_bytes: model_bytes.len() as u64,
+            sha256: artifact_hash,
+        }],
+    };
+    std::fs::write(
+        stage_dir.join("manifest.json"),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    ModelInstaller::new(models_root)
+        .install_package(&stage_dir)
+        .unwrap();
+}
 
 struct MockSession {
     scale: usize,
