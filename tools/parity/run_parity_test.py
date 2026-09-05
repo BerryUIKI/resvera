@@ -6,18 +6,14 @@ Validates numerical parity between PyTorch reference implementation and ONNX Run
 import os
 import sys
 from pathlib import Path
-import numpy as np
-import torch
-import onnxruntime as ort
-
-# Add tools/export to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "export"))
-from arch_rrdb import RRDBNet
-from metrics import compute_mad, compute_mse, compute_psnr, compute_ssim
 
 
-def create_synthetic_fixtures() -> dict[str, np.ndarray]:
+
+
+def create_synthetic_fixtures():
     """Generate deterministic test fixtures of shape (1, 3, 64, 64) in range [0, 1]."""
+    import numpy as np
+
     fixtures = {}
 
     # 1. Gradient
@@ -62,6 +58,12 @@ def run_model_parity(
     print(f"Running Parity Suite for {model_name}")
     print(f"ONNX Model: {onnx_path}")
     print(f"=======================================================")
+
+    import torch
+    import onnxruntime as ort
+    sys.path.insert(0, str(Path(__file__).parent.parent / "export"))
+    from arch_rrdb import RRDBNet
+    from metrics import compute_mad, compute_mse, compute_psnr, compute_ssim
 
     # Initialize PyTorch Reference Model
     py_model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=num_blocks, num_grow_ch=32, scale=4)
@@ -120,33 +122,57 @@ def run_model_parity(
 
 
 def main():
-    base_dir = Path(__file__).parent.parent.parent
-    export_dir = base_dir / "artifacts" / "exports"
+    import argparse
 
-    models = [
-        (
-            "realesrgan-x4plus",
-            export_dir / "realesrgan-x4plus" / "model.onnx",
-            export_dir / "realesrgan-x4plus" / "weights.pth",
-            23,
-        ),
-        (
-            "realesrgan-x4plus-anime",
-            export_dir / "realesrgan-x4plus-anime" / "model.onnx",
-            export_dir / "realesrgan-x4plus-anime" / "weights.pth",
-            6,
-        ),
-    ]
+    parser = argparse.ArgumentParser(
+        description="Verify numerical parity between PyTorch reference and ONNX graph execution."
+    )
+    parser.add_argument(
+        "--model",
+        choices=["realesrgan-x4plus", "realesrgan-x4plus-anime", "custom"],
+        default="realesrgan-x4plus",
+        help="Model architecture family (default: realesrgan-x4plus)",
+    )
+    parser.add_argument(
+        "--onnx",
+        type=str,
+        required=True,
+        help="Path to exported ONNX model artifact (required)",
+    )
+    parser.add_argument(
+        "--weights",
+        type=str,
+        required=True,
+        help="Path to source PyTorch .pth weights checkpoint (required)",
+    )
+    parser.add_argument(
+        "--num-blocks",
+        type=int,
+        default=None,
+        help="Number of RRDB blocks (default: 23 for x4plus, 6 for anime)",
+    )
 
-    all_results = []
-    for mname, onnx_file, weight_file, blocks in models:
-        if not onnx_file.exists():
-            print(f"Error: ONNX file not found at {onnx_file}. Run tools/export/export_realesrgan.py first.")
-            sys.exit(1)
-        res = run_model_parity(mname, onnx_file, weight_file, blocks)
-        all_results.extend(res)
+    args = parser.parse_args()
 
-    all_passed = all(r["passed"] for r in all_results)
+    onnx_file = Path(args.onnx)
+    if not onnx_file.is_file():
+        sys.stderr.write(f"Error: ONNX file not found: {onnx_file}\n")
+        sys.exit(1)
+
+    weight_file = Path(args.weights)
+    if not weight_file.is_file():
+        sys.stderr.write(f"Error: Weights file not found: {weight_file}\n")
+        sys.exit(1)
+
+    if args.num_blocks is not None:
+        blocks = args.num_blocks
+    elif args.model == "realesrgan-x4plus-anime":
+        blocks = 6
+    else:
+        blocks = 23
+
+    results = run_model_parity(args.model, onnx_file, weight_file, blocks)
+    all_passed = all(r["passed"] for r in results)
     print("\n=======================================================")
     if all_passed:
         print("ALL PARITY TESTS PASSED SUCCESSFULLY! (FP32 PyTorch vs ONNX Runtime CPU)")
