@@ -243,10 +243,39 @@ fn test_background_queue_worker_execution() {
             break;
         }
     }
+    // Verify that worker continues processing sequential queued jobs without frontend process_next_job calls
+    let req2 = CoreJobRequest {
+        input_path: input_path.to_str().unwrap().to_string(),
+        output_directory: temp.path().to_str().unwrap().to_string(),
+        model_id: "realesrgan-x4plus".to_string(),
+        model_variant_id: "default".to_string(),
+        target_scale: 4,
+        output_format: OutputFormat::Png,
+        overwrite: true,
+        tile_size: Some(32),
+        provider_preference: Some("cpu".to_string()),
+    };
+    let job2 = create_upscale_job_impl(&state, req2).unwrap();
+    assert_eq!(job2.state, "queued");
+
+    let mut processed2 = false;
+    for _ in 0..50 {
+        std::thread::sleep(Duration::from_millis(50));
+        let current2 = get_job_impl(&state, &job2.id).unwrap();
+        if current2.state == "failed" {
+            processed2 = true;
+            break;
+        }
+    }
+
     worker.stop();
     assert!(
         processed,
-        "Background worker should have picked up and executed the queued job"
+        "Background worker should have picked up and executed the first queued job"
+    );
+    assert!(
+        processed2,
+        "Background worker should have automatically picked up and executed the second queued job without client process_next_job"
     );
 }
 

@@ -57,10 +57,10 @@ fn main() {
                 settings_path,
             };
 
-            // Start backend-owned queue worker
-            let _worker = QueueWorker::start(app_state.clone());
-            // Keep worker alive for app lifetime
+            // Start backend-owned queue worker and keep worker alive for app lifetime
+            let worker = QueueWorker::start(app_state.clone());
             app.manage(app_state);
+            app.manage(worker);
 
             Ok(())
         })
