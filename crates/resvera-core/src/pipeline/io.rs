@@ -142,6 +142,14 @@ pub fn save_image_with_alpha<P: AsRef<Path>>(
             encoder.encode(rgb.as_raw(), w, h, ExtendedColorType::Rgb8)?;
         }
         ImageFormat::WebP => {
+            if let OutputFormat::Webp {
+                lossless: false, ..
+            } = format
+            {
+                return Err(PipelineError::Validation(
+                    "Lossy WebP encoding is not supported by the pure-Rust encoder; please select lossless WebP, PNG, or JPEG.".into(),
+                ));
+            }
             let encoder = WebPEncoder::new_lossless(&mut writer);
             if let Some(ref rgba) = rgba_opt {
                 encoder.encode(rgba.as_raw(), w, h, ExtendedColorType::Rgba8)?;
