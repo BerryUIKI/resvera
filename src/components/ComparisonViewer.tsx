@@ -10,6 +10,7 @@ interface ComparisonViewerProps {
   progressPercent?: number;
   progressStage?: string;
   onFilesSelected?: (files: File[]) => void;
+  onPickImages?: () => void;
 }
 
 export const ComparisonViewer: Component<ComparisonViewerProps> = (props) => {
@@ -154,7 +155,10 @@ export const ComparisonViewer: Component<ComparisonViewerProps> = (props) => {
           </div>
         </div>
       ) : (
-        <DropZone onFilesSelected={(files) => props.onFilesSelected?.(files)} />
+        <DropZone
+          onFilesSelected={(files) => props.onFilesSelected?.(files)}
+          onPickImages={props.onPickImages}
+        />
       )}
     </div>
   );
