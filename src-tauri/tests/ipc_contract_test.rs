@@ -450,8 +450,10 @@ fn test_save_settings_dynamic_models_root() {
         .any(|m| m.id == "realesrgan-x4plus" && m.installed));
 
     // Switch settings to root_b
-    let mut updated_settings = AppSettings::default();
-    updated_settings.models_directory = Some(root_b.to_str().unwrap().to_string());
+    let updated_settings = AppSettings {
+        models_directory: Some(root_b.to_str().unwrap().to_string()),
+        ..Default::default()
+    };
     save_settings_impl(&state, updated_settings).unwrap();
 
     // models_root in AppState should now be updated to root_b
