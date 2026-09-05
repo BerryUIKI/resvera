@@ -260,6 +260,63 @@ impl ModelInstaller {
             artifact_path,
         })
     }
+
+    /// Removes a specific installed version of a model.
+    /// If the removed version is currently active, current.json is removed.
+    /// If no other versions remain, the model directory is removed.
+    pub fn remove_model_version(
+        &self,
+        model_id: &str,
+        package_version: &str,
+    ) -> Result<bool, InstallerError> {
+        crate::validate_path_component(model_id, "model_id")
+            .map_err(InstallerError::CorruptPackage)?;
+        crate::validate_path_component(package_version, "package_version")
+            .map_err(InstallerError::CorruptPackage)?;
+
+        let model_dir = self.models_root.join(model_id);
+        let version_dir = model_dir.join(package_version);
+
+        if !version_dir.exists() {
+            return Ok(false);
+        }
+
+        // If currently active, remove pointer
+        if let Ok(Some(active)) = self.get_active_version(model_id) {
+            if active == package_version {
+                let current_file = model_dir.join("current.json");
+                let _ = fs::remove_file(current_file);
+            }
+        }
+
+        fs::remove_dir_all(&version_dir)?;
+
+        // If no versions left, clean up model_dir
+        if let Ok(entries) = fs::read_dir(&model_dir) {
+            let remaining = entries
+                .filter_map(|e| e.ok())
+                .any(|e| e.file_name() != "current.json");
+            if !remaining {
+                let _ = fs::remove_dir_all(&model_dir);
+            }
+        }
+
+        Ok(true)
+    }
+
+    /// Removes all installed versions and files for a model.
+    pub fn uninstall_model(&self, model_id: &str) -> Result<bool, InstallerError> {
+        crate::validate_path_component(model_id, "model_id")
+            .map_err(InstallerError::CorruptPackage)?;
+
+        let model_dir = self.models_root.join(model_id);
+        if !model_dir.exists() {
+            return Ok(false);
+        }
+
+        fs::remove_dir_all(&model_dir)?;
+        Ok(true)
+    }
 }
 
 fn restore_backup(backup_dir: &Path, version_dir: &Path) {
@@ -444,5 +501,25 @@ mod tests {
             .unwrap(),
             b"v1.0 model bytes"
         );
+
+        // 5. Test remove_model_version & uninstall_model
+        assert!(installer
+            .remove_model_version("realesrgan-x4plus", "2.0.0")
+            .unwrap());
+        assert!(!root.path().join("realesrgan-x4plus/2.0.0").exists());
+        // v1.0.0 is still installed and active
+        assert_eq!(
+            installer.get_active_version("realesrgan-x4plus").unwrap(),
+            Some("1.0.0".into())
+        );
+
+        // Uninstall model completely
+        assert!(installer.uninstall_model("realesrgan-x4plus").unwrap());
+        assert!(!root.path().join("realesrgan-x4plus").exists());
+        assert_eq!(
+            installer.get_active_version("realesrgan-x4plus").unwrap(),
+            None
+        );
+        assert!(!installer.uninstall_model("realesrgan-x4plus").unwrap());
     }
 }

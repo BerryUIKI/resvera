@@ -47,6 +47,7 @@ fn test_ipc_commands_workflow() {
     let settings_path = temp.path().join("settings.json");
     let state = AppState {
         orchestrator,
+        models_root: Arc::new(Mutex::new(models_root.clone())),
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path,
     };
@@ -123,6 +124,7 @@ fn test_settings_transactional_failure_does_not_mutate_in_memory() {
     let initial = AppSettings::default();
     let state = AppState {
         orchestrator,
+        models_root: Arc::new(Mutex::new(temp.path().join("models"))),
         settings: Arc::new(Mutex::new(initial.clone())),
         settings_path: invalid_settings_path,
     };
@@ -203,6 +205,7 @@ fn test_background_queue_worker_execution() {
     let settings_path = temp.path().join("settings.json");
     let state = AppState {
         orchestrator,
+        models_root: Arc::new(Mutex::new(models_root.clone())),
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path,
     };
@@ -348,4 +351,117 @@ fn install_test_model(models_root: &std::path::Path) {
     ModelInstaller::new(models_root)
         .install_package(&stage)
         .unwrap();
+}
+
+#[test]
+fn test_uninstall_model_success_and_validation() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let models_root = temp.path().join("models");
+    install_test_model(&models_root);
+
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    );
+    let settings_path = temp.path().join("settings.json");
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(models_root.clone())),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path,
+    };
+
+    // Verify model is initially installed
+    let models = list_models_impl(&state.models_root.lock().unwrap());
+    assert!(models
+        .iter()
+        .any(|m| m.id == "realesrgan-x4plus" && m.installed));
+
+    // Invalid model IDs should be rejected
+    assert_eq!(
+        uninstall_model_impl(&state, "".into()).unwrap_err().code,
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        uninstall_model_impl(&state, "model\0bad".into())
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        uninstall_model_impl(&state, "../traversal".into())
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        uninstall_model_impl(&state, "nested/path".into())
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidArgument
+    );
+
+    // Uninstall installed model successfully
+    let uninstalled = uninstall_model_impl(&state, "realesrgan-x4plus".into()).unwrap();
+    assert!(uninstalled);
+
+    // After uninstallation, list_models_impl reflects installed: false
+    let models_after = list_models_impl(&state.models_root.lock().unwrap());
+    assert!(models_after
+        .iter()
+        .any(|m| m.id == "realesrgan-x4plus" && !m.installed));
+
+    // Idempotent: uninstalling already removed model returns false without error
+    let uninstalled_again = uninstall_model_impl(&state, "realesrgan-x4plus".into()).unwrap();
+    assert!(!uninstalled_again);
+}
+
+#[test]
+fn test_save_settings_dynamic_models_root() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let root_a = temp.path().join("models_a");
+    let root_b = temp.path().join("models_b");
+    install_test_model(&root_a);
+
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        &root_a,
+    );
+    let settings_path = temp.path().join("settings.json");
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(root_a.clone())),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path,
+    };
+
+    // Initially uses root_a where model is installed
+    let models = list_models_impl(&state.models_root.lock().unwrap());
+    assert!(models
+        .iter()
+        .any(|m| m.id == "realesrgan-x4plus" && m.installed));
+
+    // Switch settings to root_b
+    let updated_settings = AppSettings {
+        models_directory: Some(root_b.to_str().unwrap().to_string()),
+        ..Default::default()
+    };
+    save_settings_impl(&state, updated_settings).unwrap();
+
+    // models_root in AppState should now be updated to root_b
+    assert_eq!(*state.models_root.lock().unwrap(), root_b);
+
+    // list_models_impl against updated models_root now reports installed: false
+    let models_switched = list_models_impl(&state.models_root.lock().unwrap());
+    assert!(models_switched
+        .iter()
+        .any(|m| m.id == "realesrgan-x4plus" && !m.installed));
 }

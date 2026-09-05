@@ -15,6 +15,7 @@ import {
   resumeQueue,
   getQueue,
   saveSettings,
+  uninstallModel,
   isTauri,
 } from "./lib/api";
 import { AppSettings, JobSnapshot, ModelSummary, OutputFormat, RuntimeStatus } from "./types/ipc";
@@ -342,10 +343,33 @@ export const App: Component = () => {
     }
   };
 
-  const handleToggleModelInstall = (modelId: string) => {
-    setModels((prev) =>
-      prev.map((m) => (m.id === modelId ? { ...m, installed: !m.installed } : m))
-    );
+  const handleToggleModelInstall = async (modelId: string) => {
+    const model = models().find((m) => m.id === modelId);
+    if (!model) return;
+
+    if (model.installed) {
+      // Uninstall: call backend then refresh model list so UI reflects reality.
+      try {
+        await uninstallModel(modelId);
+      } catch (err) {
+        console.error("Failed to uninstall model:", err);
+        // Refresh anyway so the UI is consistent with backend state.
+      }
+      try {
+        const refreshed = await listModels();
+        setModels(refreshed);
+      } catch {
+        // Fall back to optimistic local update if refresh fails.
+        setModels((prev) =>
+          prev.map((m) => (m.id === modelId ? { ...m, installed: false } : m))
+        );
+      }
+    } else {
+      // Install: not yet supported (requires download infrastructure).
+      alert(
+        "Offline installation only: place the model package in the models directory and restart Resvera."
+      );
+    }
   };
 
   const handleSaveSettingsModal = async (newSettings: AppSettings) => {

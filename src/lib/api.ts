@@ -266,3 +266,16 @@ export async function getQueue(): Promise<QueueSnapshot> {
     revision: "rev-1",
   };
 }
+
+/**
+ * Remove an installed model from disk.
+ * Returns `true` if the model directory was found and deleted, `false` if it
+ * was already absent (idempotent).  Throws on I/O errors.
+ */
+export async function uninstallModel(modelId: string): Promise<boolean> {
+  if (isTauri()) {
+    return await invoke<boolean>("uninstall_model", { modelId });
+  }
+  // Browser stub: nothing to delete.
+  return false;
+}
