@@ -219,3 +219,171 @@ fn test_submission_rejects_incompatible_model_options() {
 mod common;
 
 use common::{install_mock_model, MockEngine};
+use resvera_core::{
+    CancellationToken, EngineCapabilities, EngineError, EngineHealth, EngineId, InferenceEngine,
+    ModelSession, OwnedTensor, TensorView,
+};
+
+struct FinalizeCancelEngine;
+
+impl InferenceEngine for FinalizeCancelEngine {
+    fn id(&self) -> EngineId {
+        EngineId("test-cancel-engine".into())
+    }
+
+    fn capabilities(&self) -> EngineCapabilities {
+        EngineCapabilities {
+            engine_id: self.id(),
+            supported_providers: vec!["cpu".into()],
+            supports_fp16: false,
+            supports_dynamic_shapes: true,
+        }
+    }
+
+    fn probe(&self) -> Result<EngineHealth, EngineError> {
+        Ok(EngineHealth {
+            healthy: true,
+            active_provider: "cpu".into(),
+            diagnostic_message: None,
+        })
+    }
+
+    fn load(
+        &self,
+        model_bytes: &[u8],
+        preference: Option<&str>,
+    ) -> Result<Box<dyn ModelSession>, EngineError> {
+        MockEngine.load(model_bytes, preference)
+    }
+
+    fn run(
+        &self,
+        session: &mut dyn ModelSession,
+        input: TensorView<'_>,
+        cancel: &CancellationToken,
+    ) -> Result<OwnedTensor, EngineError> {
+        let out = MockEngine.run(session, input, cancel)?;
+        // Trigger cancellation right as inference completes so finalization detects it.
+        cancel.cancel();
+        Ok(out)
+    }
+}
+
+#[test]
+fn test_cancellation_during_finalization_cleans_artifacts() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let models_root = temp.path().join("models");
+    install_mock_model(&models_root, "realesrgan-x4plus", 4);
+    let preview_dir = temp.path().join("previews");
+    let orchestrator = JobOrchestrator::with_models_root(
+        db.clone(),
+        Arc::new(FinalizeCancelEngine),
+        preview_dir.clone(),
+        &models_root,
+    );
+
+    let input_path = temp.path().join("cancel_input.png");
+    create_test_image(&input_path, 32, 32);
+
+    let output_dir = temp.path().join("outputs");
+    let req = UpscaleJobRequest {
+        input_path: input_path.to_str().unwrap().to_string(),
+        output_directory: output_dir.to_str().unwrap().to_string(),
+        model_id: "realesrgan-x4plus".to_string(),
+        model_variant_id: "default".to_string(),
+        target_scale: 4,
+        output_format: OutputFormat::Png,
+        overwrite: true,
+        tile_size: Some(32),
+        provider_preference: Some("cpu".to_string()),
+    };
+
+    let queued = orchestrator.submit_job(&req).unwrap();
+    assert_eq!(queued.state, "queued");
+
+    // Processing will run inference and trigger cancellation right at the finalization boundary
+    let processed = orchestrator.process_next_job().unwrap().unwrap();
+    assert_eq!(processed.state, "cancelled");
+
+    // Verify neither target output nor preview thumbnail remain orphaned on disk
+    let expected_output = output_dir.join("cancel_input_4x.png");
+    assert!(
+        !expected_output.exists(),
+        "Target output file should have been cleaned up on cancellation"
+    );
+
+    let preview_file = preview_dir.join(format!("{}_preview.png", queued.id));
+    assert!(
+        !preview_file.exists(),
+        "Preview file should have been cleaned up on cancellation"
+    );
+
+    // Database state remains strictly cancelled
+    let db_job = db.get_job(&queued.id).unwrap().unwrap();
+    assert_eq!(db_job.state, "cancelled");
+}
+
+#[test]
+fn test_database_cancellation_race_during_finalizing_commits() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let models_root = temp.path().join("models");
+    install_mock_model(&models_root, "realesrgan-x4plus", 4);
+    let orchestrator = JobOrchestrator::with_models_root(
+        db.clone(),
+        Arc::new(MockEngine),
+        temp.path().join("previews"),
+        &models_root,
+    );
+
+    let input_path = temp.path().join("race_input.png");
+    create_test_image(&input_path, 16, 16);
+
+    let req = UpscaleJobRequest {
+        input_path: input_path.to_str().unwrap().to_string(),
+        output_directory: temp.path().to_str().unwrap().to_string(),
+        model_id: "realesrgan-x4plus".to_string(),
+        model_variant_id: "default".to_string(),
+        target_scale: 4,
+        output_format: OutputFormat::Png,
+        overwrite: true,
+        tile_size: Some(32),
+        provider_preference: Some("cpu".to_string()),
+    };
+
+    let queued = orchestrator.submit_job(&req).unwrap();
+    assert_eq!(queued.state, "queued");
+
+    // Claim and transition through running to finalizing
+    let claimed = db.claim_next_queued_job().unwrap().unwrap();
+    assert_eq!(claimed.id, queued.id);
+    assert_eq!(claimed.state, "preparing");
+    assert!(db
+        .transition_job_state(&claimed.id, "preparing", "running")
+        .unwrap());
+    assert!(db
+        .transition_job_state(&claimed.id, "running", "finalizing")
+        .unwrap());
+
+    // Concurrent cancel arrives while finalizing
+    let cancelled = db.cancel_job(&claimed.id).unwrap();
+    assert!(cancelled);
+
+    // Completion commit should now fail due to state constraint
+    let commit_res = db.update_job_success(&claimed.id, "/fake/out.png", "/fake/prev.png");
+    assert!(commit_res.is_err());
+
+    // Failure update cannot overwrite the terminal cancelled state
+    let failure_applied = db
+        .update_job_failure(&claimed.id, "processingFailed", "Error occurred")
+        .unwrap();
+    assert!(
+        !failure_applied,
+        "Failure update must not overwrite cancelled state"
+    );
+
+    // Job in database remains reliably cancelled
+    let final_record = db.get_job(&claimed.id).unwrap().unwrap();
+    assert_eq!(final_record.state, "cancelled");
+}

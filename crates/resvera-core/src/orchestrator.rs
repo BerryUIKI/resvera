@@ -321,6 +321,7 @@ impl JobOrchestrator {
         match result {
             Ok(completed) => Ok(Some(completed)),
             Err(OrchestratorError::Engine(EngineError::Cancelled))
+            | Err(OrchestratorError::Pipeline(PipelineError::Cancelled))
             | Err(OrchestratorError::Cancelled) => {
                 let _ = self.db.cancel_job(&job_id)?;
                 Ok(self.db.get_job(&job_id)?)
