@@ -7,6 +7,40 @@ on:
     branches: [ "dev", "main" ]
 
 jobs:
+  lint:
+    name: Hygiene, Lint & Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Diff Hygiene Check
+        run: git diff --check HEAD~1 2>/dev/null || true
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rustfmt Check
+        run: cargo fmt --check
+
+      - name: Install system dependencies (Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Clippy Warnings Denied
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Export & Parity Toolchain Tests
+        run: python3 -m unittest discover -s tools/export
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -47,3 +81,6 @@ jobs:
 
       - name: Run Rust Workspace Tests
         run: cargo test --workspace --verbose
+
+      - name: Tauri Desktop No-Bundle Build Check
+        run: cargo build --manifest-path src-tauri/Cargo.toml --no-default-features

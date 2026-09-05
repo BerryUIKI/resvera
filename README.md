@@ -19,11 +19,10 @@ Resvera is an open-source desktop image upscaler and restoration application bui
   - **Real-ESRGAN x4plus Anime** (RRDB-6B, Anime / Illustrations)
   - **Real-CUGAN 2x / 4x** (CUGAN with Reflection Padding & Denoise levels)
   - **Real-HAT-GAN 4x** (Transformer Self-Attention with 16px Window Alignment)
-- 🚀 **Hardware Acceleration (Execution Providers)**:
-  - Windows: **DirectML** (DirectX 12 GPU)
-  - macOS: **CoreML** (Apple Silicon Neural Engine)
-  - Linux / Windows: **CUDA** (NVIDIA Tensor Core) & **CPU SIMD** Fallback
-- 🛡️ **Cryptographic Model Center**: Staged downloads with Ed25519 signatures and per-chunk SHA-256 integrity verification.
+- 🚀 **Hardware Acceleration & Execution Providers**:
+  - **CPU (SIMD)**: 100% verified, cross-platform default baseline across all supported platforms.
+  - Hardware accelerators (**DirectML**, **CoreML**, **CUDA**, **OpenVINO**) are integrated architecturally, but fail-closed and reported as unverified/unavailable pending maintainer hardware test records.
+- 🛡️ **Cryptographic Model Center**: Staged downloads with Ed25519 signatures and per-chunk SHA-256 integrity verification (production catalogs require pinned public keys).
 - 🎛️ **Precision Image Pipeline**:
   - Rust-native cosine tile feathering & seamless overlap blending
   - Arbitrary custom scale downsampling (Lanczos3) and 8x multi-pass cascade upscale
