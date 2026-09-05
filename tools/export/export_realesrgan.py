@@ -8,10 +8,10 @@ import hashlib
 import os
 import sys
 from pathlib import Path
-import torch
-import onnx
 
-from arch_rrdb import RRDBNet
+# Defer heavy ML framework imports to execution time so argument parsing,
+# file validation, and hash checking can fail closed on any Python environment.
+
 
 
 def get_sha256(filepath: str | Path) -> str:
@@ -22,7 +22,9 @@ def get_sha256(filepath: str | Path) -> str:
     return h.hexdigest()
 
 
-def build_model(model_name: str) -> torch.nn.Module:
+def build_model(model_name: str):
+    from arch_rrdb import RRDBNet
+
     if model_name == "realesrgan-x4plus":
         return RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
     elif model_name == "realesrgan-x4plus-anime":
@@ -32,11 +34,14 @@ def build_model(model_name: str) -> torch.nn.Module:
 
 
 def export_to_onnx(
-    model: torch.nn.Module,
+    model,
     output_path: str | Path,
     opset: int = 17,
     dummy_shape: tuple[int, int, int, int] = (1, 3, 64, 64),
 ) -> str:
+    import torch
+    import onnx
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -72,61 +77,86 @@ def export_to_onnx(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Export Real-ESRGAN to ONNX")
+    parser = argparse.ArgumentParser(
+        description="Export verified Real-ESRGAN checkpoint to ONNX with strict integrity checks."
+    )
     parser.add_argument(
         "--model",
-        choices=["realesrgan-x4plus", "realesrgan-x4plus-anime", "both"],
-        default="both",
-        help="Model to export",
+        choices=["realesrgan-x4plus", "realesrgan-x4plus-anime"],
+        required=True,
+        help="Specific model architecture to export (required)",
     )
     parser.add_argument(
         "--weights",
         type=str,
+        required=True,
+        help="Path to verified upstream PyTorch .pth weights checkpoint (required)",
+    )
+    parser.add_argument(
+        "--expected-sha256",
+        type=str,
         default=None,
-        help="Optional path to PyTorch .pth weights checkpoint",
+        help="Expected SHA256 checksum of the weights file for integrity verification",
     )
     parser.add_argument(
         "--out-dir",
         type=str,
-        default="artifacts/exports",
-        help="Directory to save exported ONNX models",
+        required=True,
+        help="Explicit destination directory for exported ONNX model (required)",
     )
-    parser.add_argument("--opset", type=int, default=17, help="ONNX opset version")
+    parser.add_argument("--opset", type=int, default=17, help="ONNX opset version (default: 17)")
 
     args = parser.parse_args()
+
+    weights_path = Path(args.weights)
+    if not weights_path.is_file():
+        sys.stderr.write(f"Error: Weights file not found or is not a regular file: {weights_path}\n")
+        sys.exit(1)
+
+    actual_sha256 = get_sha256(weights_path)
+    if args.expected_sha256:
+        expected = args.expected_sha256.lower().strip()
+        actual = actual_sha256.lower().strip()
+        if actual != expected:
+            sys.stderr.write(
+                f"Error: Weights SHA256 mismatch!\nExpected: {expected}\nActual:   {actual}\n"
+            )
+            sys.exit(1)
+
     out_dir = Path(args.out_dir)
+    if not out_dir.exists():
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-    models_to_export = (
-        ["realesrgan-x4plus", "realesrgan-x4plus-anime"]
-        if args.model == "both"
-        else [args.model]
-    )
+    print(f"\n--- Exporting {args.model} ---")
+    print(f"Verified Source Weights: {weights_path} (SHA256: {actual_sha256})")
 
-    for mname in models_to_export:
-        print(f"\n--- Processing {mname} ---")
-        model = build_model(mname)
-        weight_file = out_dir / mname / "weights.pth"
-        weight_file.parent.mkdir(parents=True, exist_ok=True)
+    model = build_model(args.model)
+    try:
+        import torch
 
-        if args.weights and os.path.exists(args.weights):
-            print(f"Loading weights from {args.weights}...")
-            state_dict = torch.load(args.weights, map_location="cpu")
-            if "params_ema" in state_dict:
-                state_dict = state_dict["params_ema"]
-            elif "params" in state_dict:
-                state_dict = state_dict["params"]
-            model.load_state_dict(state_dict, strict=True)
-        else:
-            print("Generating deterministic weights and saving to weights.pth...")
-            torch.manual_seed(42)
-            state_dict = {}
-            for name, param in model.named_parameters():
-                state_dict[name] = torch.randn_like(param) * 0.02
-            model.load_state_dict(state_dict, strict=True)
-            torch.save(state_dict, str(weight_file))
+        state_dict = torch.load(str(weights_path), map_location="cpu")
+    except Exception as e:
+        sys.stderr.write(f"Error: Failed to parse checkpoint {weights_path}: {e}\n")
+        sys.exit(1)
 
-        onnx_file = out_dir / mname / "model.onnx"
-        export_to_onnx(model, onnx_file, opset=args.opset)
+    if isinstance(state_dict, dict):
+        if "params_ema" in state_dict:
+            state_dict = state_dict["params_ema"]
+        elif "params" in state_dict:
+            state_dict = state_dict["params"]
+    else:
+        sys.stderr.write(f"Error: Unexpected checkpoint structure: expected state dict mapping.\n")
+        sys.exit(1)
+
+    try:
+        model.load_state_dict(state_dict, strict=True)
+    except Exception as e:
+        sys.stderr.write(f"Error: State dict validation failed for model '{args.model}': {e}\n")
+        sys.exit(1)
+
+    onnx_file = out_dir / f"{args.model}.onnx"
+    export_to_onnx(model, onnx_file, opset=args.opset)
+    print(f"Successfully exported {args.model} to {onnx_file}")
 
 
 if __name__ == "__main__":
