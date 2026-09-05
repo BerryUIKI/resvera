@@ -122,6 +122,10 @@ impl JobOrchestrator {
         self.paused.load(Ordering::SeqCst)
     }
 
+    pub fn set_models_root<P: AsRef<Path>>(&mut self, path: P) {
+        self.models_root = path.as_ref().to_path_buf();
+    }
+
     pub fn submit_job(&self, req: &UpscaleJobRequest) -> Result<JobRecord, OrchestratorError> {
         validate_input_file(&req.input_path)?;
         let provider = normalize_provider(req.provider_preference.as_deref())?;

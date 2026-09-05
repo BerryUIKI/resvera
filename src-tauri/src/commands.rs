@@ -11,6 +11,9 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone)]
 pub struct AppState {
     pub orchestrator: JobOrchestrator,
+    /// Shared, runtime-mutable models root; updated when the user changes
+    /// `modelsDirectory` in settings. Use `models_root.lock()` to read or write.
+    pub models_root: Arc<Mutex<PathBuf>>,
     pub settings: Arc<Mutex<AppSettings>>,
     pub settings_path: PathBuf,
 }
@@ -364,7 +367,49 @@ pub fn list_models_impl(models_root: &Path) -> Vec<ModelSummary> {
 
 #[tauri::command]
 pub fn list_models(state: tauri::State<'_, AppState>) -> Vec<ModelSummary> {
-    list_models_impl(&state.orchestrator.models_root)
+    let root = state.models_root.lock().unwrap().clone();
+    list_models_impl(&root)
+}
+
+pub fn uninstall_model_impl(state: &AppState, model_id: String) -> Result<bool, ApiError> {
+    // Reject obviously unsafe IDs.
+    if model_id.trim().is_empty()
+        || model_id.contains('\0')
+        || model_id.contains('/')
+        || model_id.contains('\\')
+    {
+        return Err(ApiError {
+            code: ErrorCode::InvalidArgument,
+            message: "model_id is invalid".into(),
+            details: None,
+            retryable: false,
+        });
+    }
+
+    let root = state.models_root.lock().unwrap().clone();
+    let installer = ModelInstaller::new(&root);
+    installer.uninstall_model(&model_id).map_err(|e| match &e {
+        resvera_models::InstallerError::Io(io_err) => ApiError {
+            code: ErrorCode::StorageFailure,
+            message: io_err.to_string(),
+            details: None,
+            retryable: false,
+        },
+        _ => ApiError {
+            code: ErrorCode::ModelNotFound,
+            message: e.to_string(),
+            details: None,
+            retryable: false,
+        },
+    })
+}
+
+#[tauri::command]
+pub fn uninstall_model(
+    state: tauri::State<'_, AppState>,
+    model_id: String,
+) -> Result<bool, ApiError> {
+    uninstall_model_impl(&state, model_id)
 }
 
 pub fn validate_path(path_str: &str) -> Result<PathBuf, ApiError> {
@@ -778,6 +823,17 @@ pub fn save_settings_impl(
 ) -> Result<AppSettings, ApiError> {
     validate_settings(&new_settings)?;
     atomic_write_settings(&state.settings_path, &new_settings)?;
+
+    // Propagate models directory change to the shared runtime path.
+    if let Some(ref dir) = new_settings.models_directory {
+        let new_path = PathBuf::from(dir);
+        if !new_path.as_os_str().is_empty() {
+            // Best-effort mkdir; ignore errors (validate_settings already checked for nulls).
+            let _ = std::fs::create_dir_all(&new_path);
+            let mut root = state.models_root.lock().unwrap();
+            *root = new_path;
+        }
+    }
 
     let mut s = state.settings.lock().unwrap();
     *s = new_settings.clone();
