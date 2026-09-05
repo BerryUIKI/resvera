@@ -17,7 +17,7 @@ import {
   saveSettings,
   isTauri,
 } from "./lib/api";
-import { AppSettings, JobSnapshot, ModelSummary, RuntimeStatus } from "./types/ipc";
+import { AppSettings, JobSnapshot, ModelSummary, OutputFormat, RuntimeStatus } from "./types/ipc";
 import { useI18n } from "./i18n";
 
 export const App: Component = () => {
@@ -132,6 +132,40 @@ export const App: Component = () => {
       if (appSettings.locale) {
         setLocale(appSettings.locale as any);
       }
+      if (appSettings.outputFormat) {
+        if (appSettings.outputFormat.kind === "jpeg") {
+          setOutputFormat("jpeg");
+          setJpegQuality(appSettings.outputFormat.quality);
+        } else if (appSettings.outputFormat.kind === "webp") {
+          setOutputFormat("webp");
+          setWebpLossless(appSettings.outputFormat.lossless);
+          if (appSettings.outputFormat.quality !== null) {
+            setJpegQuality(appSettings.outputFormat.quality);
+          }
+        } else {
+          setOutputFormat("png");
+        }
+      }
+      setOverwrite(appSettings.overwriteExisting);
+      if (appSettings.tileSizeOverride !== undefined) {
+        setSelectedTileSize(appSettings.tileSizeOverride);
+      }
+      if (appSettings.tileOverlap !== undefined && appSettings.tileOverlap !== null) {
+        setSelectedTileOverlap(appSettings.tileOverlap);
+      }
+      if (appSettings.blendMode) {
+        setSelectedBlendMode(appSettings.blendMode);
+      }
+      if (appSettings.precision) {
+        setSelectedPrecision(appSettings.precision);
+      }
+      if (appSettings.providerPreference) {
+        if (appSettings.providerPreference.kind === "specific") {
+          setSelectedProvider(appSettings.providerPreference.providerId);
+        } else {
+          setSelectedProvider("automatic");
+        }
+      }
       await syncQueueState();
     } catch (err) {
       console.error("Failed to initialize backend runtime or settings:", err);
@@ -146,8 +180,28 @@ export const App: Component = () => {
     });
   });
 
+  const getEffectiveOutputFormat = (): OutputFormat => {
+    const fmt = outputFormat();
+    if (fmt === "jpeg") {
+      return { kind: "jpeg", quality: jpegQuality() };
+    }
+    if (fmt === "webp") {
+      return {
+        kind: "webp",
+        lossless: webpLossless(),
+        quality: webpLossless() ? null : jpegQuality(),
+      };
+    }
+    return { kind: "png" };
+  };
+
   const handleStartUpscale = async (specificJobId?: string) => {
     if (!isTauri()) return;
+
+    const effFormat = getEffectiveOutputFormat();
+    const effOverwrite = overwrite();
+    const effTileSize = selectedTileSize() ?? settings().tileSizeOverride ?? null;
+    const effProvider = selectedProvider() === "automatic" ? null : selectedProvider();
 
     if (specificJobId) {
       setSelectedJobId(specificJobId);
@@ -161,10 +215,10 @@ export const App: Component = () => {
             modelId: selectedModelId(),
             modelVariantId: selectedVariantId(),
             targetScale: targetScale(),
-            outputFormat: settings().outputFormat,
-            overwrite: settings().overwriteExisting,
-            tileSize: settings().tileSizeOverride,
-            providerPreference: selectedProvider() === "automatic" ? null : selectedProvider(),
+            outputFormat: effFormat,
+            overwrite: effOverwrite,
+            tileSize: effTileSize,
+            providerPreference: effProvider,
           });
           setSelectedJobId(created.id);
         } catch (err) {
@@ -182,10 +236,10 @@ export const App: Component = () => {
             modelId: selectedModelId(),
             modelVariantId: selectedVariantId(),
             targetScale: targetScale(),
-            outputFormat: settings().outputFormat,
-            overwrite: settings().overwriteExisting,
-            tileSize: settings().tileSizeOverride,
-            providerPreference: selectedProvider() === "automatic" ? null : selectedProvider(),
+            outputFormat: effFormat,
+            overwrite: effOverwrite,
+            tileSize: effTileSize,
+            providerPreference: effProvider,
           });
           setSelectedJobId(created.id);
         } catch (err) {
@@ -229,6 +283,10 @@ export const App: Component = () => {
     }
 
     const targetOutDir = customOutputDir().trim() || settings().outputDirectory || "";
+    const effFormat = getEffectiveOutputFormat();
+    const effOverwrite = overwrite();
+    const effTileSize = selectedTileSize() ?? settings().tileSizeOverride ?? null;
+    const effProvider = selectedProvider() === "automatic" ? null : selectedProvider();
 
     for (const file of files) {
       const filePath = (file as any).path || "";
@@ -244,10 +302,10 @@ export const App: Component = () => {
           modelId: selectedModelId(),
           modelVariantId: selectedVariantId(),
           targetScale: targetScale(),
-          outputFormat: settings().outputFormat,
-          overwrite: settings().overwriteExisting,
-          tileSize: settings().tileSizeOverride,
-          providerPreference: selectedProvider() === "automatic" ? null : selectedProvider(),
+          outputFormat: effFormat,
+          overwrite: effOverwrite,
+          tileSize: effTileSize,
+          providerPreference: effProvider,
         });
         setSelectedJobId(created.id);
       } catch (err) {
