@@ -2,8 +2,10 @@ use crate::adapter::{
     CuganAdapter, HatAdapter, ModelAdapter, PipelineError, RrdbAdapter, TileConstraints,
 };
 use crate::engine::{CancellationToken, EngineError, InferenceEngine};
-use crate::pipeline::atomic::{atomic_save_image, generate_output_path};
-use crate::pipeline::io::{load_image, OutputFormat};
+use crate::pipeline::atomic::{
+    atomic_save_image, atomic_save_image_with_alpha, generate_output_path,
+};
+use crate::pipeline::io::{load_image_with_alpha, OutputFormat};
 use crate::pipeline::resample::downsample_lanczos3;
 use crate::pipeline::tiling::{TileBlender, TilePlan};
 use image::RgbImage;
@@ -335,7 +337,9 @@ impl JobOrchestrator {
     ) -> Result<JobRecord, OrchestratorError> {
         cancel.check()?;
 
-        let src_img = load_image(&job.input_path)?;
+        let loaded_input = load_image_with_alpha(&job.input_path)?;
+        let src_img = loaded_input.rgb;
+        let src_alpha = loaded_input.alpha;
         let (width, height) = src_img.dimensions();
 
         let installer = ModelInstaller::new(&self.models_root);
@@ -432,6 +436,21 @@ impl JobOrchestrator {
 
         let mut output_img = blender.finalize();
 
+        // Resample alpha mask if present to match native upscale dimensions
+        let mut output_alpha = if let Some(ref alpha) = src_alpha {
+            let native_w = width
+                .checked_mul(native_scale)
+                .ok_or_else(|| OrchestratorError::Validation("Upscaled width overflowed".into()))?;
+            let native_h = height.checked_mul(native_scale).ok_or_else(|| {
+                OrchestratorError::Validation("Upscaled height overflowed".into())
+            })?;
+            Some(crate::pipeline::resample::resample_alpha_lanczos3(
+                alpha, native_w, native_h,
+            )?)
+        } else {
+            None
+        };
+
         // Handle target scale (e.g. 2x requested on a 4x native model -> Lanczos3 downsample)
         if job.target_scale < native_scale {
             let target_w = width.checked_mul(job.target_scale).ok_or_else(|| {
@@ -441,6 +460,11 @@ impl JobOrchestrator {
                 OrchestratorError::Validation("Requested output height overflowed".into())
             })?;
             output_img = downsample_lanczos3(&output_img, target_w, target_h)?;
+            if let Some(ref a) = output_alpha {
+                output_alpha = Some(crate::pipeline::resample::resample_alpha_lanczos3(
+                    a, target_w, target_h,
+                )?);
+            }
         }
 
         // Parse configured output format
@@ -474,9 +498,10 @@ impl JobOrchestrator {
             job.overwrite,
         );
 
-        // Atomic file write
-        atomic_save_image(
+        // Atomic file write with alpha channel
+        atomic_save_image_with_alpha(
             &output_img,
+            output_alpha.as_ref(),
             &target_path,
             &output_format,
             Some(Path::new(&job.input_path)),

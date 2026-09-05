@@ -129,19 +129,13 @@ pub struct CuganAdapter {
 
 impl Default for CuganAdapter {
     fn default() -> Self {
-        Self {
-            scale: 2,
-            pad: 18,
-        }
+        Self { scale: 2, pad: 18 }
     }
 }
 
 impl CuganAdapter {
     pub fn new(scale: u32) -> Self {
-        Self {
-            scale,
-            pad: 18,
-        }
+        Self { scale, pad: 18 }
     }
 
     fn reflect_coord(coord: i32, max_len: i32) -> u32 {
@@ -289,7 +283,10 @@ impl ModelAdapter for HatAdapter {
     }
 
     fn validate_manifest(&self, manifest: &ModelManifest) -> Result<(), PipelineError> {
-        if manifest.family != "hat" && manifest.family != "real-hat" && manifest.family != "real-hat-gan" {
+        if manifest.family != "hat"
+            && manifest.family != "real-hat"
+            && manifest.family != "real-hat-gan"
+        {
             return Err(PipelineError::Validation(format!(
                 "Unsupported family for HatAdapter: {}",
                 manifest.family
@@ -377,4 +374,3 @@ impl ModelAdapter for HatAdapter {
         Ok(img)
     }
 }
-
