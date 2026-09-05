@@ -279,3 +279,29 @@ export async function uninstallModel(modelId: string): Promise<boolean> {
   // Browser stub: nothing to delete.
   return false;
 }
+
+/**
+ * Open native system file picker dialog to select image files.
+ * Returns the selected absolute filesystem paths.
+ */
+export async function pickImages(): Promise<string[]> {
+  if (isTauri()) {
+    return await invoke<string[]>("pick_images");
+  }
+  return [];
+}
+
+/**
+ * Stage raw image bytes into the backend staging cache.
+ * Returns the staged absolute filesystem path ready for queue submission.
+ */
+export async function stageInputImage(
+  fileName: string,
+  data: Uint8Array | number[]
+): Promise<string> {
+  if (isTauri()) {
+    const bytes = data instanceof Uint8Array ? Array.from(data) : data;
+    return await invoke<string>("stage_input_image", { fileName, data: bytes });
+  }
+  throw new Error("Tauri native desktop runtime is required to stage images.");
+}

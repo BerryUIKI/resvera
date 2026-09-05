@@ -16,6 +16,8 @@ import {
   getQueue,
   saveSettings,
   uninstallModel,
+  pickImages,
+  stageInputImage,
   isTauri,
 } from "./lib/api";
 import { AppSettings, JobSnapshot, ModelSummary, OutputFormat, RuntimeStatus } from "./types/ipc";
@@ -179,6 +181,29 @@ export const App: Component = () => {
     onCleanup(() => {
       clearInterval(interval);
     });
+
+    if (isTauri()) {
+      try {
+        const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+        const unlisten = await getCurrentWebview().onDragDropEvent(async (event) => {
+          if (event.payload.type === "drop") {
+            const imageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".bmp"];
+            const droppedPaths = event.payload.paths.filter((p) => {
+              const lower = p.toLowerCase();
+              return imageExtensions.some((ext) => lower.endsWith(ext));
+            });
+            if (droppedPaths.length > 0) {
+              await addPathsToQueue(droppedPaths);
+            }
+          }
+        });
+        onCleanup(() => {
+          unlisten();
+        });
+      } catch (e) {
+        console.warn("Could not register native window drag-drop listener:", e);
+      }
+    }
   });
 
   const getEffectiveOutputFormat = (): OutputFormat => {
@@ -276,8 +301,10 @@ export const App: Component = () => {
     }
   };
 
-  const addFilesToQueue = async (files: File[]) => {
-    if (!files || files.length === 0) return;
+  let sidebarFileInputRef: HTMLInputElement | undefined;
+
+  const addPathsToQueue = async (paths: string[]) => {
+    if (!paths || paths.length === 0) return;
     if (!isTauri()) {
       alert("Tauri native desktop runtime is required for image processing.");
       return;
@@ -289,12 +316,8 @@ export const App: Component = () => {
     const effTileSize = selectedTileSize() ?? settings().tileSizeOverride ?? null;
     const effProvider = selectedProvider() === "automatic" ? null : selectedProvider();
 
-    for (const file of files) {
-      const filePath = (file as any).path || "";
-      if (!filePath) {
-        console.warn("File object missing native filesystem path:", file.name);
-        continue;
-      }
+    for (const filePath of paths) {
+      if (!filePath || !filePath.trim()) continue;
 
       try {
         const created = await createUpscaleJob({
@@ -317,10 +340,57 @@ export const App: Component = () => {
     await syncQueueState();
   };
 
+  const addFilesToQueue = async (files: File[]) => {
+    if (!files || files.length === 0) return;
+    if (!isTauri()) {
+      alert("Tauri native desktop runtime is required for image processing.");
+      return;
+    }
+
+    const paths: string[] = [];
+    for (const file of files) {
+      const filePath = (file as any).path || "";
+      if (filePath) {
+        paths.push(filePath);
+      } else {
+        // In standard WebKit / WebView2, File.path is stripped for web security.
+        // Stage the raw bytes into the desktop application staging cache.
+        try {
+          const buffer = await file.arrayBuffer();
+          const staged = await stageInputImage(file.name, new Uint8Array(buffer));
+          paths.push(staged);
+        } catch (err) {
+          console.error("Failed to stage input image:", file.name, err);
+        }
+      }
+    }
+
+    if (paths.length > 0) {
+      await addPathsToQueue(paths);
+    }
+  };
+
+  const handlePickImages = async () => {
+    if (isTauri()) {
+      try {
+        const paths = await pickImages();
+        if (paths && paths.length > 0) {
+          await addPathsToQueue(paths);
+        }
+      } catch (err) {
+        console.error("Native file picker failed, falling back to input:", err);
+        sidebarFileInputRef?.click();
+      }
+    } else {
+      sidebarFileInputRef?.click();
+    }
+  };
+
   const handleFileUpload = (e: Event) => {
     const target = e.target as HTMLInputElement;
     if (!target.files || target.files.length === 0) return;
     addFilesToQueue(Array.from(target.files));
+    target.value = "";
   };
 
   const handleCancelJob = async (id: string) => {
@@ -460,6 +530,7 @@ export const App: Component = () => {
               progressPercent={Math.round((currentJob()?.progress?.fraction || 0) * 100)}
               progressStage={currentJob()?.progress?.stage}
               onFilesSelected={addFilesToQueue}
+              onPickImages={handlePickImages}
             />
           </div>
         </div>
@@ -863,19 +934,24 @@ export const App: Component = () => {
               </button>
             </Show>
 
-            <label class="w-full flex items-center justify-center space-x-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl cursor-pointer border border-slate-700 transition shadow-sm">
+            <button
+              type="button"
+              onClick={handlePickImages}
+              class="w-full flex items-center justify-center space-x-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl cursor-pointer border border-slate-700 transition shadow-sm"
+            >
               <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
               </svg>
               <span>{t("controls.addImages")}</span>
-              <input
-                type="file"
-                multiple
-                accept="image/png,image/jpeg,image/webp"
-                onChange={handleFileUpload}
-                class="hidden"
-              />
-            </label>
+            </button>
+            <input
+              ref={sidebarFileInputRef}
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/webp"
+              onChange={handleFileUpload}
+              class="hidden"
+            />
           </div>
         </div>
       </div>

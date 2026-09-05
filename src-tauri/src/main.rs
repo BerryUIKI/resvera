@@ -29,6 +29,9 @@ fn main() {
             let preview_dir = app_cache_dir.join("previews");
             let _ = std::fs::create_dir_all(&preview_dir);
 
+            let staging_dir = app_cache_dir.join("staging");
+            let _ = std::fs::create_dir_all(&staging_dir);
+
             let default_models_dir = std::env::var_os("RESVERA_MODELS_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| app_data_dir.join("models"));
@@ -69,6 +72,7 @@ fn main() {
                 models_root,
                 settings,
                 settings_path,
+                staging_dir,
             };
 
             // Start backend-owned queue worker and keep worker alive for app lifetime
@@ -93,6 +97,8 @@ fn main() {
             get_jobs_history,
             load_settings,
             save_settings,
+            pick_images,
+            stage_input_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Resvera desktop application");

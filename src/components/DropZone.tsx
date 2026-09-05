@@ -3,11 +3,13 @@ import { useI18n } from "../i18n";
 
 interface DropZoneProps {
   onFilesSelected: (files: File[]) => void;
+  onPickImages?: () => void;
 }
 
 export const DropZone: Component<DropZoneProps> = (props) => {
   const { t } = useI18n();
   const [isDragging, setIsDragging] = createSignal(false);
+  let fileInputRef: HTMLInputElement | undefined;
 
   const handleDragOver = (e: DragEvent) => {
     e.preventDefault();
@@ -73,19 +75,30 @@ export const DropZone: Component<DropZoneProps> = (props) => {
       </p>
 
       <div class="flex items-center space-x-3">
-        <label class="px-5 py-2.5 bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold text-xs rounded-xl cursor-pointer shadow-lg shadow-sky-500/20 transition flex items-center space-x-2">
+        <button
+          type="button"
+          onClick={() => {
+            if (props.onPickImages) {
+              props.onPickImages();
+            } else {
+              fileInputRef?.click();
+            }
+          }}
+          class="px-5 py-2.5 bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold text-xs rounded-xl cursor-pointer shadow-lg shadow-sky-500/20 transition flex items-center space-x-2"
+        >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
           </svg>
           <span>{t("controls.addImages")}</span>
-          <input
-            type="file"
-            multiple
-            accept="image/png,image/jpeg,image/webp"
-            onChange={handleFileInput}
-            class="hidden"
-          />
-        </label>
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/png,image/jpeg,image/webp"
+          onChange={handleFileInput}
+          class="hidden"
+        />
       </div>
     </div>
   );

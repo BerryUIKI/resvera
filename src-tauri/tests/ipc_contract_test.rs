@@ -5,6 +5,7 @@ use resvera_desktop::worker::QueueWorker;
 use resvera_engine_ort::OrtEngine;
 use resvera_models::{compute_file_sha256, ModelInstaller};
 use resvera_persistence::AppDatabase;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tempfile::tempdir;
@@ -50,6 +51,7 @@ fn test_ipc_commands_workflow() {
         models_root: Arc::new(Mutex::new(models_root.clone())),
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path,
+        staging_dir: temp.path().join("staging"),
     };
 
     // 1. Get runtime status
@@ -127,6 +129,7 @@ fn test_settings_transactional_failure_does_not_mutate_in_memory() {
         models_root: Arc::new(Mutex::new(temp.path().join("models"))),
         settings: Arc::new(Mutex::new(initial.clone())),
         settings_path: invalid_settings_path,
+        staging_dir: temp.path().join("staging"),
     };
 
     let mut modified = initial.clone();
@@ -208,6 +211,7 @@ fn test_background_queue_worker_execution() {
         models_root: Arc::new(Mutex::new(models_root.clone())),
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path,
+        staging_dir: temp.path().join("staging"),
     };
 
     let input_path = temp.path().join("worker_photo.png");
@@ -373,6 +377,7 @@ fn test_uninstall_model_success_and_validation() {
         models_root: Arc::new(Mutex::new(models_root.clone())),
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path,
+        staging_dir: temp.path().join("staging"),
     };
 
     // Verify model is initially installed
@@ -441,6 +446,7 @@ fn test_save_settings_dynamic_models_root() {
         models_root: Arc::new(Mutex::new(root_a.clone())),
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path,
+        staging_dir: temp.path().join("staging"),
     };
 
     // Initially uses root_a where model is installed
@@ -464,4 +470,53 @@ fn test_save_settings_dynamic_models_root() {
     assert!(models_switched
         .iter()
         .any(|m| m.id == "realesrgan-x4plus" && !m.installed));
+}
+
+#[test]
+fn test_stage_input_image_validation_and_staging() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let models_root = temp.path().join("models");
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    );
+    let staging_dir = temp.path().join("staging");
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(models_root)),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path: temp.path().join("settings.json"),
+        staging_dir: staging_dir.clone(),
+    };
+
+    // 1. Rejects empty data
+    let empty_err = stage_input_image_impl(&state, "photo.png".into(), vec![]).unwrap_err();
+    assert_eq!(empty_err.code, ErrorCode::InvalidArgument);
+
+    // 2. Rejects unsupported extensions
+    let ext_err = stage_input_image_impl(&state, "malware.exe".into(), vec![1, 2, 3]).unwrap_err();
+    assert_eq!(ext_err.code, ErrorCode::UnsupportedFormat);
+
+    // 3. Successfully stages image and sanitizes traversal in file_name
+    let sample_bytes = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]; // PNG header
+    let staged_path_str = stage_input_image_impl(
+        &state,
+        "../../suspicious/path/my_photo.PNG".into(),
+        sample_bytes.clone(),
+    )
+    .unwrap();
+
+    let staged_path = PathBuf::from(&staged_path_str);
+    assert!(staged_path.exists());
+    let canonical_staging = staging_dir.canonicalize().unwrap_or(staging_dir);
+    assert!(staged_path.starts_with(&canonical_staging));
+    assert!(staged_path_str.ends_with("my_photo.PNG"));
+
+    // Verify content on disk
+    let read_back = std::fs::read(&staged_path).unwrap();
+    assert_eq!(read_back, sample_bytes);
 }

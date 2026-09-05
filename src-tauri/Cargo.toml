@@ -18,6 +18,7 @@ uuid = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tauri = { workspace = true }
+rfd = "0.15"
 
 [build-dependencies]
 tauri-build = { workspace = true }

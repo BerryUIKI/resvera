@@ -16,6 +16,7 @@ pub struct AppState {
     pub models_root: Arc<Mutex<PathBuf>>,
     pub settings: Arc<Mutex<AppSettings>>,
     pub settings_path: PathBuf,
+    pub staging_dir: PathBuf,
 }
 
 pub fn map_orchestrator_error(err: &OrchestratorError) -> ApiError {
@@ -410,6 +411,115 @@ pub fn uninstall_model(
     model_id: String,
 ) -> Result<bool, ApiError> {
     uninstall_model_impl(&state, model_id)
+}
+
+pub fn stage_input_image_impl(
+    state: &AppState,
+    file_name: String,
+    data: Vec<u8>,
+) -> Result<String, ApiError> {
+    if data.is_empty() {
+        return Err(ApiError {
+            code: ErrorCode::InvalidArgument,
+            message: "Image data cannot be empty".into(),
+            details: None,
+            retryable: false,
+        });
+    }
+
+    if data.len() > 200 * 1024 * 1024 {
+        return Err(ApiError {
+            code: ErrorCode::InvalidArgument,
+            message: "Image data exceeds maximum allowed size (200MB)".into(),
+            details: None,
+            retryable: false,
+        });
+    }
+
+    let clean_name = Path::new(&file_name)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("input.png");
+
+    let ext = Path::new(clean_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_else(|| "png".to_string());
+
+    if !["png", "jpg", "jpeg", "webp", "bmp"].contains(&ext.as_str()) {
+        return Err(ApiError {
+            code: ErrorCode::UnsupportedFormat,
+            message: format!("Unsupported file extension: .{}", ext),
+            details: None,
+            retryable: false,
+        });
+    }
+
+    let staged_file_name = format!("{}_{}", uuid::Uuid::new_v4(), clean_name);
+    let staged_path = state.staging_dir.join(staged_file_name);
+
+    std::fs::create_dir_all(&state.staging_dir).map_err(|e| ApiError {
+        code: ErrorCode::StorageFailure,
+        message: format!("Failed to create staging directory: {}", e),
+        details: None,
+        retryable: false,
+    })?;
+
+    std::fs::write(&staged_path, &data).map_err(|e| ApiError {
+        code: ErrorCode::StorageFailure,
+        message: format!("Failed to write staged image: {}", e),
+        details: None,
+        retryable: false,
+    })?;
+
+    let canonical = staged_path.canonicalize().unwrap_or(staged_path);
+    canonical
+        .to_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| ApiError {
+            code: ErrorCode::StorageFailure,
+            message: "Staged path cannot be converted to string".into(),
+            details: None,
+            retryable: false,
+        })
+}
+
+#[tauri::command]
+pub fn stage_input_image(
+    state: tauri::State<'_, AppState>,
+    file_name: String,
+    data: Vec<u8>,
+) -> Result<String, ApiError> {
+    stage_input_image_impl(&state, file_name, data)
+}
+
+pub fn pick_images_impl() -> Result<Vec<String>, ApiError> {
+    let files = rfd::FileDialog::new()
+        .add_filter(
+            "Image",
+            &[
+                "png", "jpg", "jpeg", "webp", "bmp", "PNG", "JPG", "JPEG", "WEBP", "BMP",
+            ],
+        )
+        .set_title("Select Images to Upscale")
+        .pick_files();
+
+    match files {
+        Some(paths) => {
+            let result = paths
+                .into_iter()
+                .filter_map(|p| p.to_str().map(|s| s.to_string()))
+                .collect();
+            Ok(result)
+        }
+        None => Ok(vec![]),
+    }
+}
+
+#[tauri::command]
+pub fn pick_images() -> Result<Vec<String>, ApiError> {
+    pick_images_impl()
 }
 
 pub fn validate_path(path_str: &str) -> Result<PathBuf, ApiError> {
