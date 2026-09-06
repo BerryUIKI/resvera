@@ -97,22 +97,22 @@ export const App: Component = () => {
         history.jobs.some((j) => j.state === "running" || j.state === "preparing" || j.state === "finalizing");
       setIsProcessingQueue(isAnyActive);
 
-      if (history.jobs.length > 0) {
-        setJobs((prev) => {
-          const prevMap = new Map(prev.map((j) => [j.id, j]));
-          return history.jobs.map((job) => {
-            const existing = prevMap.get(job.id);
-            return {
-              ...job,
-              previewPath: job.previewPath || existing?.previewPath || null,
-              outputPath: job.outputPath || existing?.outputPath || null,
-            };
-          });
+      setJobs((prev) => {
+        const prevMap = new Map(prev.map((j) => [j.id, j]));
+        return history.jobs.map((job) => {
+          const existing = prevMap.get(job.id);
+          return {
+            ...job,
+            previewPath: job.previewPath || existing?.previewPath || null,
+            outputPath: job.outputPath || existing?.outputPath || null,
+          };
         });
+      });
 
-        if (!selectedJobId() && history.jobs.length > 0) {
-          setSelectedJobId(history.jobs[0].id);
-        }
+      if (!selectedJobId() && history.jobs.length > 0) {
+        setSelectedJobId(history.jobs[0].id);
+      } else if (selectedJobId() && !history.jobs.some((j) => j.id === selectedJobId())) {
+        setSelectedJobId(history.jobs.length > 0 ? history.jobs[0].id : null);
       }
     } catch (err) {
       console.warn("Failed to sync queue state from backend:", err);
@@ -128,6 +128,15 @@ export const App: Component = () => {
       ]);
       setRuntimeStatus(status);
       setModels(modelList);
+      if (modelList.length > 0) {
+        const currentModel = modelList.find((m) => m.id === selectedModelId());
+        if (!currentModel || !currentModel.installed) {
+          const firstInstalled = modelList.find((m) => m.installed);
+          if (firstInstalled) {
+            handleModelChange(firstInstalled.id);
+          }
+        }
+      }
       setSettings(appSettings);
       if (appSettings.outputDirectory) {
         setCustomOutputDir(appSettings.outputDirectory);
@@ -316,6 +325,9 @@ export const App: Component = () => {
     const effTileSize = selectedTileSize() ?? settings().tileSizeOverride ?? null;
     const effProvider = selectedProvider() === "automatic" ? null : selectedProvider();
 
+    let failureCount = 0;
+    let lastErrorMessage = "";
+
     for (const filePath of paths) {
       if (!filePath || !filePath.trim()) continue;
 
@@ -332,9 +344,22 @@ export const App: Component = () => {
           providerPreference: effProvider,
         });
         setSelectedJobId(created.id);
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to submit upscale job to backend queue:", err);
+        failureCount++;
+        lastErrorMessage = err?.message || String(err);
       }
+    }
+
+    if (failureCount > 0) {
+      const isModelNotInstalled =
+        lastErrorMessage.toLowerCase().includes("model") ||
+        lastErrorMessage.toLowerCase().includes("version") ||
+        lastErrorMessage.toLowerCase().includes("not installed");
+      const alertMsg = isModelNotInstalled
+        ? `${t("queue.modelNotInstalled")}\n(${lastErrorMessage})`
+        : `${t("queue.addJobFailed")}: ${lastErrorMessage}`;
+      alert(alertMsg);
     }
 
     await syncQueueState();
@@ -524,7 +549,7 @@ export const App: Component = () => {
 
           <div class="flex-1 min-h-0">
             <ComparisonViewer
-              beforeUrl={currentJob()?.previewPath || null}
+              beforeUrl={currentJob()?.previewPath || currentJob()?.inputPath || null}
               afterUrl={currentJob()?.outputPath || null}
               isProcessing={currentJob()?.state === "running"}
               progressPercent={Math.round((currentJob()?.progress?.fraction || 0) * 100)}
