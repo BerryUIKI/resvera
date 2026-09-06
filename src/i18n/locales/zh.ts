@@ -22,6 +22,8 @@ export const zh = {
     completed: "已完成",
     failed: "处理失败",
     cancelled: "已取消",
+    modelNotInstalled: "所选模型尚未安装，请在模型中心下载或选择已安装的模型。",
+    addJobFailed: "添加图片任务失败",
   },
   controls: {
     title: "超分辨率参数",

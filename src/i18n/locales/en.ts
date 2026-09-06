@@ -22,6 +22,8 @@ export const en = {
     completed: "Completed",
     failed: "Failed",
     cancelled: "Cancelled",
+    modelNotInstalled: "Selected model is not installed yet. Please install it from Model Center or choose an installed model.",
+    addJobFailed: "Failed to add upscale job",
   },
   controls: {
     title: "Upscale Parameters",

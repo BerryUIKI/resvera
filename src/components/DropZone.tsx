@@ -30,7 +30,7 @@ export const DropZone: Component<DropZoneProps> = (props) => {
 
     if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const validFiles = Array.from(e.dataTransfer.files).filter((f) =>
-        f.type.startsWith("image/")
+        f.type.startsWith("image/") || /\.(png|jpe?g|webp|bmp)$/i.test(f.name)
       );
       if (validFiles.length > 0) {
         props.onFilesSelected(validFiles);
