@@ -81,7 +81,7 @@ export const ModelCenterModal: Component<ModelCenterModalProps> = (props) => {
                     <div class="flex items-center space-x-3 text-xs text-slate-400">
                       <span>{t("modelCenter.license")}: <strong class="text-slate-300">{model.licenseSpdx}</strong></span>
                       <span>•</span>
-                      <span>Size: <strong class="text-slate-300">{((Number(model.downloadSizeBytes || 0)) / 1024 / 1024).toFixed(1)} MB</strong></span>
+                      <span>{t("modelCenter.size")}: <strong class="text-slate-300">{((Number(model.downloadSizeBytes || 0)) / 1024 / 1024).toFixed(1)} MB</strong></span>
                       <span>•</span>
                       <span>{t("modelCenter.providers")}: <strong class="text-slate-300">{model.validatedProviders.join(", ")}</strong></span>
                     </div>
@@ -118,7 +118,7 @@ export const ModelCenterModal: Component<ModelCenterModalProps> = (props) => {
           </div>
 
           <div class="flex items-center justify-between pt-3 border-t border-slate-800 text-xs text-slate-400">
-            <span>🛡️ Staged downloads always verify SHA-256 and Ed25519 signature before activation.</span>
+            <span>🛡️ {t("modelCenter.securityGuarantee")}</span>
             <button
               onClick={props.onClose}
               class="px-4 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition"
