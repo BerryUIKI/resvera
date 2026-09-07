@@ -93,7 +93,7 @@ export const ComparisonViewer: Component<ComparisonViewerProps> = (props) => {
           {resolvedAfter() && (
             <div class="absolute top-4 left-4 flex items-center space-x-2 bg-emerald-950/80 backdrop-blur-md px-3 py-1.5 rounded-xl border border-emerald-700/80 text-emerald-400 text-xs shadow-lg">
               <span>✨</span>
-              <span class="font-semibold">超分辨率增强完成 (可拖动画布左右对比)</span>
+              <span class="font-semibold">{t("viewer.completedHint")}</span>
             </div>
           )}
 
@@ -106,7 +106,7 @@ export const ComparisonViewer: Component<ComparisonViewerProps> = (props) => {
                   <h4 class="text-sm font-semibold text-slate-100 mb-1">
                     {props.progressStage || t("queue.processing")}
                   </h4>
-                  <p class="text-xs text-slate-400">Offline inference running on local accelerator...</p>
+                  <p class="text-xs text-slate-400">{t("viewer.processingHint")}</p>
                 </div>
                 <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
                   <div

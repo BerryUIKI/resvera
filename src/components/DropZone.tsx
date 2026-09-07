@@ -71,7 +71,7 @@ export const DropZone: Component<DropZoneProps> = (props) => {
         {t("queue.dropImages")}
       </h3>
       <p class="text-xs text-slate-500 mb-6 text-center max-w-sm">
-        Supports PNG, JPEG, and WebP images. All processing is 100% offline.
+        {t("queue.dropZoneHint")}
       </p>
 
       <div class="flex items-center space-x-3">

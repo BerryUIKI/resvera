@@ -315,7 +315,7 @@ export const App: Component = () => {
   const addPathsToQueue = async (paths: string[]) => {
     if (!paths || paths.length === 0) return;
     if (!isTauri()) {
-      alert("Tauri native desktop runtime is required for image processing.");
+      alert(t("app.desktopRuntimeRequired"));
       return;
     }
 
@@ -368,7 +368,7 @@ export const App: Component = () => {
   const addFilesToQueue = async (files: File[]) => {
     if (!files || files.length === 0) return;
     if (!isTauri()) {
-      alert("Tauri native desktop runtime is required for image processing.");
+      alert(t("app.desktopRuntimeRequired"));
       return;
     }
 
@@ -522,10 +522,10 @@ export const App: Component = () => {
                   }`}
                 >
                   {currentJob()?.state === "succeeded"
-                    ? "✓ 已完成"
+                    ? `✓ ${t("queue.completed")}`
                     : currentJob()?.state === "running"
-                    ? "⏳ 处理中..."
-                    : "• 排队等待中 (Queued)"}
+                    ? `⏳ ${t("queue.processing")}...`
+                    : `• ${t("queue.queued")}`}
                 </span>
               </div>
 
@@ -538,8 +538,8 @@ export const App: Component = () => {
                     <span>⚡</span>
                     <span>
                       {currentJob()?.state === "succeeded"
-                        ? "重新放大 (Re-run)"
-                        : "开始放大 (Upscale)"}
+                        ? t("controls.rerun")
+                        : t("controls.upscaleCurrent")}
                     </span>
                   </button>
                 </Show>
@@ -630,10 +630,10 @@ export const App: Component = () => {
                         onChange={(e) => setSelectedVariantId(e.currentTarget.value)}
                         class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
                       >
-                        <option value="no-denoise">-1 (保留纹理 / No denoise)</option>
-                        <option value="denoise-1">1 (轻度降噪 / Conservative)</option>
-                        <option value="denoise-2">2 (中度降噪 / Balanced)</option>
-                        <option value="denoise-3">3 (强力降噪 / Aggressive)</option>
+                        <option value="no-denoise">{t("controls.cuganVariants.noDenoise")}</option>
+                        <option value="denoise-1">{t("controls.cuganVariants.denoise1")}</option>
+                        <option value="denoise-2">{t("controls.cuganVariants.denoise2")}</option>
+                        <option value="denoise-3">{t("controls.cuganVariants.denoise3")}</option>
                       </select>
                     </div>
 
@@ -644,9 +644,9 @@ export const App: Component = () => {
                         onChange={(e) => setCuganPaddingMode(e.currentTarget.value)}
                         class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
                       >
-                        <option value="reflect">Reflect (镜像边缘 - 消除暗边)</option>
-                        <option value="replicate">Replicate (复制边界)</option>
-                        <option value="zero">Zero (补零)</option>
+                        <option value="reflect">{t("controls.cuganPadding.reflect")}</option>
+                        <option value="replicate">{t("controls.cuganPadding.replicate")}</option>
+                        <option value="zero">{t("controls.cuganPadding.zero")}</option>
                       </select>
                     </div>
                   </Show>
@@ -657,7 +657,7 @@ export const App: Component = () => {
                       <label class="text-[11px] font-medium text-slate-400">{t("controls.windowSize")}</label>
                       <div class="flex items-center justify-between bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 text-xs">
                         <span class="text-slate-300">Self-Attention Window</span>
-                        <span class="text-sky-400 font-mono font-semibold">16 × 16 px (Aligned)</span>
+                        <span class="text-sky-400 font-mono font-semibold">16 × 16 px</span>
                       </div>
                     </div>
                   </Show>
@@ -666,7 +666,7 @@ export const App: Component = () => {
                   <Show when={selectedModelId().includes("realesrgan")}>
                     <div class="space-y-1">
                       <div class="flex items-center justify-between text-[11px] font-medium text-slate-400">
-                        <span>降噪与退化消除强度</span>
+                        <span>{t("controls.esrganDenoiseTitle")}</span>
                         <span class="font-mono text-sky-400">{Math.round(esrganDenoise() * 100)}%</span>
                       </div>
                       <input
@@ -703,11 +703,11 @@ export const App: Component = () => {
                       onChange={(e) => setSelectedProvider(e.currentTarget.value)}
                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
                     >
-                      <option value="automatic">{t("controls.auto")} (DirectML / CoreML / CPU)</option>
-                      <option value="directml">DirectML (DirectX 12 GPU - Windows)</option>
-                      <option value="coreml">CoreML (Apple Silicon NPU - macOS)</option>
-                      <option value="cuda">CUDA (NVIDIA Tensor Core)</option>
-                      <option value="cpu">CPU (Universal Fallback)</option>
+                      <option value="automatic">{t("controls.providerOptions.auto")}</option>
+                      <option value="directml">{t("controls.providerOptions.directml")}</option>
+                      <option value="coreml">{t("controls.providerOptions.coreml")}</option>
+                      <option value="cuda">{t("controls.providerOptions.cuda")}</option>
+                      <option value="cpu">{t("controls.providerOptions.cpu")}</option>
                     </select>
                   </div>
 
@@ -754,11 +754,11 @@ export const App: Component = () => {
                       }}
                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
                     >
-                      <option value="auto">{t("controls.auto")} (256px)</option>
-                      <option value="128">128px (低显存模式 / Low VRAM)</option>
-                      <option value="256">256px (标准推荐 / Balanced)</option>
-                      <option value="512">512px (高速模式 / High VRAM)</option>
-                      <option value="1024">1024px (极致性能 / Ultra GPU)</option>
+                      <option value="auto">{t("controls.tiles.auto")}</option>
+                      <option value="128">{t("controls.tiles.tile128")}</option>
+                      <option value="256">{t("controls.tiles.tile256")}</option>
+                      <option value="512">{t("controls.tiles.tile512")}</option>
+                      <option value="1024">{t("controls.tiles.tile1024")}</option>
                     </select>
                   </div>
 
@@ -787,8 +787,8 @@ export const App: Component = () => {
                       onChange={(e) => setSelectedBlendMode(e.currentTarget.value)}
                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
                     >
-                      <option value="cosine">余弦羽化 (Cosine Feathering)</option>
-                      <option value="linear">线性渐变 (Linear)</option>
+                      <option value="cosine">{t("controls.blendOptions.cosine")}</option>
+                      <option value="linear">{t("controls.blendOptions.linear")}</option>
                     </select>
                   </div>
                 </div>
@@ -847,7 +847,7 @@ export const App: Component = () => {
                   {/* WebP Lossless Toggle */}
                   <Show when={outputFormat() === "webp"}>
                     <div class="flex items-center justify-between pt-1">
-                      <span class="text-[11px] text-slate-400 font-medium">无损压缩 (Lossless WebP)</span>
+                      <span class="text-[11px] text-slate-400 font-medium">{t("controls.losslessWebp")}</span>
                       <input
                         type="checkbox"
                         checked={webpLossless()}
@@ -865,7 +865,7 @@ export const App: Component = () => {
                       </label>
                       <button
                         onClick={() => {
-                          const newDir = prompt("请输入输出保存目录路径（留空表示与原图同目录）：", customOutputDir() || "");
+                          const newDir = prompt(t("controls.promptOutputDir"), customOutputDir() || "");
                           if (newDir !== null) {
                             const trimmed = newDir.trim();
                             setCustomOutputDir(trimmed);
@@ -954,7 +954,7 @@ export const App: Component = () => {
                     ? t("queue.processing")
                     : queuedCount() > 0
                     ? `${t("controls.upscaleAll")} (${queuedCount()})`
-                    : "⚡ 开始放大当前图片 (Upscale)"}
+                    : t("controls.upscaleCurrent")}
                 </span>
               </button>
             </Show>

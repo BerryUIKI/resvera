@@ -77,7 +77,7 @@ export const QueueList: Component<QueueListProps> = (props) => {
                       props.onStartJob?.(job.id);
                     }}
                     class="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/60 p-1 rounded transition text-xs"
-                    title="放大此图片 (Upscale)"
+                    title={t("controls.upscaleCurrent")}
                   >
                     ▶
                   </button>

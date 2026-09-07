@@ -112,9 +112,9 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                   }
                   class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                 >
-                  <option value="dark">Dark (OLED Slate)</option>
-                  <option value="light">Light</option>
-                  <option value="system">System Default</option>
+                  <option value="dark">{t("settings.themes.dark")}</option>
+                  <option value="light">{t("settings.themes.light")}</option>
+                  <option value="system">{t("settings.themes.system")}</option>
                 </select>
               </div>
 
@@ -176,7 +176,6 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                 <div>
                   <label class="block font-medium mb-1 text-slate-300 flex items-center justify-between">
                     <span>{t("settings.modelsDir")}</span>
-                    <span class="text-[10px] text-sky-400 font-mono">ONNX Weights Directory</span>
                   </label>
                   <div class="flex items-center space-x-2">
                     <input
@@ -189,11 +188,11 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                         }))
                       }
                       class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-sky-500"
-                      placeholder="C:\Users\Username\.resvera\models"
+                      placeholder="~/.resvera/models"
                     />
                     <button
                       onClick={() => {
-                        const newPath = prompt("Enter new Models Storage Directory path:", draft().modelsDirectory || "C:\\resvera\\models");
+                        const newPath = prompt(t("settings.promptModelsDir"), draft().modelsDirectory || "~/.resvera/models");
                         if (newPath) {
                           setDraft((prev) => ({
                             ...prev,
@@ -212,7 +211,7 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                 <div>
                   <label class="block font-medium mb-1 text-slate-300 flex items-center justify-between">
                     <span>{t("settings.outputDir")}</span>
-                    <span class="text-[10px] text-slate-400 font-normal">留空即默认与原图同目录</span>
+                    <span class="text-[10px] text-slate-400 font-normal">{t("settings.outputDirEmptyHint")}</span>
                   </label>
                   <div class="flex items-center space-x-2">
                     <input
@@ -225,11 +224,11 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                         }))
                       }
                       class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 font-mono text-xs focus:outline-none focus:border-sky-500"
-                      placeholder="与原图片存放在同一文件夹 (Same as input image directory)"
+                      placeholder={t("controls.sameAsInput")}
                     />
                     <button
                       onClick={() => {
-                        const newPath = prompt("请输入输出保存目录路径（留空表示与原图同目录）：", draft().outputDirectory || "");
+                        const newPath = prompt(t("controls.promptOutputDir"), draft().outputDirectory || "");
                         if (newPath !== null) {
                           setDraft((prev) => ({
                             ...prev,
@@ -250,7 +249,7 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                           }))
                         }
                         class="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 rounded-lg border border-slate-700 text-xs transition"
-                        title="清空"
+                        title={t("settings.clear")}
                       >
                         ✕
                       </button>
@@ -281,11 +280,11 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                     }}
                     class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                   >
-                    <option value="automatic">{t("controls.auto")} (DirectML / CoreML / CPU)</option>
-                    <option value="directml">DirectML (DirectX 12 GPU - Windows)</option>
-                    <option value="coreml">CoreML (Apple Neural Engine - macOS)</option>
-                    <option value="cuda">CUDA (NVIDIA Tensor Core)</option>
-                    <option value="cpu">CPU (Universal Offline Fallback)</option>
+                    <option value="automatic">{t("controls.providerOptions.auto")}</option>
+                    <option value="directml">{t("controls.providerOptions.directml")}</option>
+                    <option value="coreml">{t("controls.providerOptions.coreml")}</option>
+                    <option value="cuda">{t("controls.providerOptions.cuda")}</option>
+                    <option value="cpu">{t("controls.providerOptions.cpu")}</option>
                   </select>
                 </div>
 
@@ -320,11 +319,11 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                       }}
                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                     >
-                      <option value="auto">{t("controls.auto")} (256px - 512px)</option>
-                      <option value="128">128px (低显存模式 / Low VRAM)</option>
-                      <option value="256">256px (标准推荐 / Balanced)</option>
-                      <option value="512">512px (高速模式 / High VRAM)</option>
-                      <option value="1024">1024px (极致性能 / Ultra GPU)</option>
+                      <option value="auto">{t("controls.tiles.autoRange")}</option>
+                      <option value="128">{t("controls.tiles.tile128")}</option>
+                      <option value="256">{t("controls.tiles.tile256")}</option>
+                      <option value="512">{t("controls.tiles.tile512")}</option>
+                      <option value="1024">{t("controls.tiles.tile1024")}</option>
                     </select>
                   </div>
                 </div>
@@ -342,9 +341,9 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                       }
                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                     >
-                      <option value="16">16px (推荐默认 - 无可见接缝)</option>
-                      <option value="24">24px (高重叠率 - 复杂纹理)</option>
-                      <option value="32">32px (最大重叠率 - 极限平滑)</option>
+                      <option value="16">{t("controls.overlaps.overlap16")}</option>
+                      <option value="24">{t("controls.overlaps.overlap24")}</option>
+                      <option value="32">{t("controls.overlaps.overlap32")}</option>
                     </select>
                   </div>
 
@@ -360,8 +359,8 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                       }
                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                     >
-                      <option value="cosine">{t("settings.cosineFeathering")}</option>
-                      <option value="linear">{t("settings.linearBlending")}</option>
+                      <option value="cosine">{t("controls.blendOptions.cosine")}</option>
+                      <option value="linear">{t("controls.blendOptions.linear")}</option>
                     </select>
                   </div>
                 </div>
@@ -369,7 +368,7 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
             </Show>
 
             <div class="bg-slate-800/60 p-3 rounded-lg border border-slate-700/50 text-[11px] text-slate-400 mt-2">
-              <span class="text-sky-400 font-semibold">{t("app.offlineMode")}:</span> Resvera 在推理与超分辨率放大全过程中 100% 纯本地运行，绝不建立任何外网连接。
+              <span class="text-sky-400 font-semibold">{t("app.offlineMode")}:</span> {t("app.offlineDescription")}
             </div>
           </div>
 
