@@ -1,6 +1,13 @@
-import { Component } from "solid-js";
+import { Component, createSignal, onMount, onCleanup } from "solid-js";
 import { RuntimeStatus } from "../types/ipc";
 import { useI18n } from "../i18n";
+import {
+  isTauri,
+  minimizeWindow,
+  toggleMaximizeWindow,
+  isWindowMaximized,
+  closeWindow,
+} from "../lib/api";
 
 interface HeaderProps {
   status: RuntimeStatus | null;
@@ -10,20 +17,87 @@ interface HeaderProps {
 
 export const Header: Component<HeaderProps> = (props) => {
   const { t } = useI18n();
+  const [isMaximized, setIsMaximized] = createSignal(false);
+
+  onMount(async () => {
+    if (isTauri()) {
+      try {
+        const max = await isWindowMaximized();
+        setIsMaximized(max);
+      } catch (err) {
+        console.warn("Failed to get initial maximized state:", err);
+      }
+    }
+
+    const handleResize = async () => {
+      if (isTauri()) {
+        try {
+          const max = await isWindowMaximized();
+          setIsMaximized(max);
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+    onCleanup(() => {
+      window.removeEventListener("resize", handleResize);
+    });
+  });
+
+  const handleMinimize = async (e: MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await minimizeWindow();
+    } catch (err) {
+      console.error("Failed to minimize window:", err);
+    }
+  };
+
+  const handleToggleMaximize = async (e?: MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    try {
+      const max = await toggleMaximizeWindow();
+      setIsMaximized(max);
+    } catch (err) {
+      console.error("Failed to toggle maximize window:", err);
+    }
+  };
+
+  const handleClose = async (e: MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await closeWindow();
+    } catch (err) {
+      console.error("Failed to close window:", err);
+    }
+  };
+
+  const handleHeaderDblClick = (e: MouseEvent) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    handleToggleMaximize();
+  };
 
   return (
-    <header class="flex items-center justify-between px-6 py-3 bg-slate-900 border-b border-slate-800 select-none">
-      <div class="flex items-center space-x-3">
-        <div class="w-8 h-8 rounded-lg bg-sky-500 flex items-center justify-center font-bold text-slate-950 text-lg shadow-md">
+    <header
+      data-tauri-drag-region
+      onDblClick={handleHeaderDblClick}
+      class="flex items-center justify-between px-6 py-2.5 bg-slate-900 border-b border-slate-800 select-none cursor-default"
+    >
+      <div data-tauri-drag-region class="flex items-center space-x-3">
+        <div class="w-8 h-8 rounded-lg bg-sky-500 flex items-center justify-center font-bold text-slate-950 text-lg shadow-md pointer-events-none">
           R
         </div>
-        <div>
+        <div class="pointer-events-none">
           <h1 class="text-base font-semibold text-slate-100 leading-tight">{t("app.title")}</h1>
           <p class="text-xs text-slate-400">{t("app.subtitle")}</p>
         </div>
       </div>
 
-      <div class="flex items-center space-x-3">
+      <div class="flex items-center space-x-2.5">
         <button
           onClick={props.onOpenModelCenter}
           class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 transition shadow-sm"
@@ -52,6 +126,59 @@ export const Header: Component<HeaderProps> = (props) => {
           </svg>
           <span>{t("header.settings")}</span>
         </button>
+
+        {/* Separator */}
+        <div class="h-4 w-px bg-slate-700/80 mx-0.5"></div>
+
+        {/* Window control buttons */}
+        <div class="flex items-center space-x-1">
+          {/* Minimize */}
+          <button
+            type="button"
+            onClick={handleMinimize}
+            title={t("window.minimize")}
+            aria-label={t("window.minimize")}
+            class="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="4" y1="12" x2="20" y2="12" />
+            </svg>
+          </button>
+
+          {/* Maximize / Restore */}
+          <button
+            type="button"
+            onClick={handleToggleMaximize}
+            title={isMaximized() ? t("window.restore") : t("window.maximize")}
+            aria-label={isMaximized() ? t("window.restore") : t("window.maximize")}
+            class="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors"
+          >
+            {isMaximized() ? (
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 4h12a1 1 0 0 1 1 1v11" />
+                <rect x="3" y="8" width="13" height="13" rx="1.5" />
+              </svg>
+            ) : (
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="4" y="4" width="16" height="16" rx="2" />
+              </svg>
+            )}
+          </button>
+
+          {/* Close */}
+          <button
+            type="button"
+            onClick={handleClose}
+            title={t("window.close")}
+            aria-label={t("window.close")}
+            class="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:text-white hover:bg-rose-600 active:bg-rose-700 transition-colors"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18" stroke-linecap="round" />
+              <line x1="6" y1="6" x2="18" y2="18" stroke-linecap="round" />
+            </svg>
+          </button>
+        </div>
       </div>
     </header>
   );

@@ -99,6 +99,10 @@ fn main() {
             save_settings,
             pick_images,
             stage_input_image,
+            minimize_window,
+            toggle_maximize_window,
+            is_window_maximized,
+            close_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Resvera desktop application");

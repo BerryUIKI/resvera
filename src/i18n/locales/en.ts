@@ -12,6 +12,12 @@ export const en = {
     settings: "Settings",
     modelCenter: "Model Center",
   },
+  window: {
+    minimize: "Minimize",
+    maximize: "Maximize",
+    restore: "Restore",
+    close: "Close",
+  },
   queue: {
     title: "Processing Queue",
     pause: "Pause Queue",

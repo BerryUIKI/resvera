@@ -12,6 +12,12 @@ export const zh = {
     settings: "应用设置",
     modelCenter: "模型中心",
   },
+  window: {
+    minimize: "最小化",
+    maximize: "最大化",
+    restore: "向下还原",
+    close: "关闭",
+  },
   queue: {
     title: "处理队列",
     pause: "暂停队列",

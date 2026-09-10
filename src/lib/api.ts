@@ -305,3 +305,30 @@ export async function stageInputImage(
   }
   throw new Error("Tauri native desktop runtime is required to stage images.");
 }
+
+export async function minimizeWindow(): Promise<void> {
+  if (isTauri()) {
+    await invoke("minimize_window");
+  }
+}
+
+export async function toggleMaximizeWindow(): Promise<boolean> {
+  if (isTauri()) {
+    return await invoke<boolean>("toggle_maximize_window");
+  }
+  return false;
+}
+
+export async function isWindowMaximized(): Promise<boolean> {
+  if (isTauri()) {
+    return await invoke<boolean>("is_window_maximized");
+  }
+  return false;
+}
+
+export async function closeWindow(): Promise<void> {
+  if (isTauri()) {
+    await invoke("close_window");
+  }
+}
+

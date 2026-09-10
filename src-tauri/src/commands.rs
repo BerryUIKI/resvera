@@ -957,3 +957,61 @@ pub fn save_settings(
 ) -> Result<AppSettings, ApiError> {
     save_settings_impl(&state, new_settings)
 }
+
+#[tauri::command]
+pub fn minimize_window(window: tauri::Window) -> Result<(), ApiError> {
+    window.minimize().map_err(|e| ApiError {
+        code: ErrorCode::Internal,
+        message: format!("Failed to minimize window: {e}"),
+        details: None,
+        retryable: false,
+    })
+}
+
+#[tauri::command]
+pub fn toggle_maximize_window(window: tauri::Window) -> Result<bool, ApiError> {
+    let is_max = window.is_maximized().map_err(|e| ApiError {
+        code: ErrorCode::Internal,
+        message: format!("Failed to get window maximize state: {e}"),
+        details: None,
+        retryable: false,
+    })?;
+    if is_max {
+        window.unmaximize().map_err(|e| ApiError {
+            code: ErrorCode::Internal,
+            message: format!("Failed to unmaximize window: {e}"),
+            details: None,
+            retryable: false,
+        })?;
+        Ok(false)
+    } else {
+        window.maximize().map_err(|e| ApiError {
+            code: ErrorCode::Internal,
+            message: format!("Failed to maximize window: {e}"),
+            details: None,
+            retryable: false,
+        })?;
+        Ok(true)
+    }
+}
+
+#[tauri::command]
+pub fn is_window_maximized(window: tauri::Window) -> Result<bool, ApiError> {
+    window.is_maximized().map_err(|e| ApiError {
+        code: ErrorCode::Internal,
+        message: format!("Failed to get window maximize state: {e}"),
+        details: None,
+        retryable: false,
+    })
+}
+
+#[tauri::command]
+pub fn close_window(window: tauri::Window) -> Result<(), ApiError> {
+    window.close().map_err(|e| ApiError {
+        code: ErrorCode::Internal,
+        message: format!("Failed to close window: {e}"),
+        details: None,
+        retryable: false,
+    })
+}
+
