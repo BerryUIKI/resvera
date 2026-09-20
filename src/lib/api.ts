@@ -13,6 +13,16 @@ export function isTauri(): boolean {
   return typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 }
 
+export function normalizePath(path: string): string {
+  if (path.startsWith("\\\\?\\UNC\\")) {
+    return `\\\\${path.slice(8)}`;
+  }
+  if (path.startsWith("\\\\?\\")) {
+    return path.slice(4);
+  }
+  return path;
+}
+
 export function resolveImageUrl(pathOrUrl: string | null | undefined): string | null {
   if (!pathOrUrl) return null;
   if (
@@ -24,14 +34,15 @@ export function resolveImageUrl(pathOrUrl: string | null | undefined): string | 
   ) {
     return pathOrUrl;
   }
+  const clean = normalizePath(pathOrUrl);
   if (isTauri()) {
     try {
-      return convertFileSrc(pathOrUrl);
+      return convertFileSrc(clean);
     } catch {
-      return pathOrUrl;
+      return clean;
     }
   }
-  return pathOrUrl;
+  return clean;
 }
 
 export async function getRuntimeStatus(): Promise<RuntimeStatus> {
@@ -268,6 +279,22 @@ export async function getQueue(): Promise<QueueSnapshot> {
 }
 
 /**
+ * Download / install a model into the local models directory.
+ */
+export async function installModel(modelId: string): Promise<ModelSummary> {
+  if (isTauri()) {
+    return await invoke<ModelSummary>("install_model", { modelId });
+  }
+  const all = await listModels();
+  const found = all.find((m) => m.id === modelId);
+  if (found) {
+    found.installed = true;
+    return found;
+  }
+  throw new Error(`Model '${modelId}' not found in catalog.`);
+}
+
+/**
  * Remove an installed model from disk.
  * Returns `true` if the model directory was found and deleted, `false` if it
  * was already absent (idempotent).  Throws on I/O errors.
@@ -331,4 +358,12 @@ export async function closeWindow(): Promise<void> {
     await invoke("close_window");
   }
 }
+
+export async function readImageData(path: string): Promise<string> {
+  if (isTauri()) {
+    return await invoke<string>("read_image_data", { path });
+  }
+  return path;
+}
+
 

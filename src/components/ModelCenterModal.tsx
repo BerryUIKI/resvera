@@ -6,6 +6,7 @@ interface ModelCenterModalProps {
   isOpen: boolean;
   models: ModelSummary[];
   modelsDirectory?: string | null;
+  installingModelId?: string | null;
   onClose: () => void;
   onToggleInstall?: (modelId: string) => void;
   onOpenSettings?: () => void;
@@ -14,8 +15,8 @@ interface ModelCenterModalProps {
 export const ModelCenterModal: Component<ModelCenterModalProps> = (props) => {
   const { t } = useI18n();
 
-  const handleInstall = (_modelId: string) => {
-    alert(t("modelCenter.offlineInstallationNote"));
+  const handleInstall = (modelId: string) => {
+    props.onToggleInstall?.(modelId);
   };
 
   return (
@@ -106,9 +107,21 @@ export const ModelCenterModal: Component<ModelCenterModalProps> = (props) => {
                     ) : (
                       <button
                         onClick={() => handleInstall(model.id)}
-                        class="px-4 py-1.5 text-xs font-semibold rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 shadow-md transition"
+                        disabled={props.installingModelId === model.id}
+                        class={`px-4 py-1.5 text-xs font-semibold rounded-lg shadow-md transition flex items-center space-x-1.5 ${
+                          props.installingModelId === model.id
+                            ? "bg-slate-700 text-sky-400 cursor-wait opacity-80"
+                            : "bg-sky-500 hover:bg-sky-400 text-slate-950"
+                        }`}
                       >
-                        {t("modelCenter.download")}
+                        {props.installingModelId === model.id ? (
+                          <>
+                            <span class="animate-spin inline-block mr-1">↻</span>
+                            <span>{t("modelCenter.downloading")}</span>
+                          </>
+                        ) : (
+                          <span>{t("modelCenter.download")}</span>
+                        )}
                       </button>
                     )}
                   </div>

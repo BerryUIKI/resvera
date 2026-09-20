@@ -10,7 +10,7 @@ interface SettingsModalProps {
 }
 
 export const SettingsModal: Component<SettingsModalProps> = (props) => {
-  const { t, locale, setLocale } = useI18n();
+  const { t, locale } = useI18n();
   const [activeTab, setActiveTab] = createSignal<"general" | "storage" | "engine">("general");
   const [draft, setDraft] = createSignal<AppSettings>(props.settings);
 
@@ -87,7 +87,6 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                   value={draft().locale || locale()}
                   onChange={(e) => {
                     const newLoc = e.currentTarget.value as Locale;
-                    setLocale(newLoc);
                     setDraft((prev) => ({
                       ...prev,
                       locale: newLoc,

@@ -15,6 +15,8 @@ import {
   resumeQueue,
   getQueue,
   saveSettings,
+  processNextJob,
+  installModel,
   uninstallModel,
   pickImages,
   stageInputImage,
@@ -54,7 +56,7 @@ export const App: Component = () => {
   const [selectedModelId, setSelectedModelId] = createSignal("realesrgan-x4plus");
   const [selectedVariantId, setSelectedVariantId] = createSignal("default");
   const [targetScale, setTargetScale] = createSignal(4);
-  const [outputFormat, setOutputFormat] = createSignal<"png" | "jpeg" | "webp">("png");
+  const [outputFormat, setOutputFormat] = createSignal<"png" | "jpeg" | "webp" | "sameAsInput">("png");
   const [jpegQuality, setJpegQuality] = createSignal(95);
   const [webpLossless, setWebpLossless] = createSignal(true);
   const [overwrite, setOverwrite] = createSignal(false);
@@ -81,6 +83,7 @@ export const App: Component = () => {
   const [isProcessingQueue, setIsProcessingQueue] = createSignal(false);
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
   const [isModelCenterOpen, setIsModelCenterOpen] = createSignal(false);
+  const [installingModelId, setInstallingModelId] = createSignal<string | null>(null);
 
   const syncQueueState = async () => {
     if (!isTauri()) return;
@@ -91,11 +94,10 @@ export const App: Component = () => {
       ]);
 
       setIsPaused(queue.paused);
-      const isAnyActive =
+      const isBusy =
         queue.activeJobId !== null ||
-        queue.queuedJobIds.length > 0 ||
         history.jobs.some((j) => j.state === "running" || j.state === "preparing" || j.state === "finalizing");
-      setIsProcessingQueue(isAnyActive);
+      setIsProcessingQueue(isBusy);
 
       setJobs((prev) => {
         const prevMap = new Map(prev.map((j) => [j.id, j]));
@@ -120,6 +122,14 @@ export const App: Component = () => {
   };
 
   onMount(async () => {
+    let syncInterval: ReturnType<typeof setInterval> | undefined;
+    let unlistenDragDrop: (() => void) | undefined;
+
+    onCleanup(() => {
+      if (syncInterval) clearInterval(syncInterval);
+      unlistenDragDrop?.();
+    });
+
     try {
       const [status, modelList, appSettings] = await Promise.all([
         getRuntimeStatus(),
@@ -154,6 +164,8 @@ export const App: Component = () => {
           if (appSettings.outputFormat.quality !== null) {
             setJpegQuality(appSettings.outputFormat.quality);
           }
+        } else if (appSettings.outputFormat.kind === "sameAsInput") {
+          setOutputFormat("sameAsInput" as any);
         } else {
           setOutputFormat("png");
         }
@@ -173,7 +185,13 @@ export const App: Component = () => {
       }
       if (appSettings.providerPreference) {
         if (appSettings.providerPreference.kind === "specific") {
-          setSelectedProvider(appSettings.providerPreference.providerId);
+          const pref = appSettings.providerPreference.providerId;
+          const supported = status?.providers.map((p) => p.id) || ["cpu"];
+          if (supported.includes(pref)) {
+            setSelectedProvider(pref);
+          } else {
+            setSelectedProvider("automatic");
+          }
         } else {
           setSelectedProvider("automatic");
         }
@@ -183,18 +201,14 @@ export const App: Component = () => {
       console.error("Failed to initialize backend runtime or settings:", err);
     }
 
-    const interval = setInterval(() => {
+    syncInterval = setInterval(() => {
       syncQueueState();
     }, 600);
-
-    onCleanup(() => {
-      clearInterval(interval);
-    });
 
     if (isTauri()) {
       try {
         const { getCurrentWebview } = await import("@tauri-apps/api/webview");
-        const unlisten = await getCurrentWebview().onDragDropEvent(async (event) => {
+        unlistenDragDrop = await getCurrentWebview().onDragDropEvent(async (event) => {
           if (event.payload.type === "drop") {
             const imageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".bmp"];
             const droppedPaths = event.payload.paths.filter((p) => {
@@ -206,9 +220,6 @@ export const App: Component = () => {
             }
           }
         });
-        onCleanup(() => {
-          unlisten();
-        });
       } catch (e) {
         console.warn("Could not register native window drag-drop listener:", e);
       }
@@ -217,6 +228,9 @@ export const App: Component = () => {
 
   const getEffectiveOutputFormat = (): OutputFormat => {
     const fmt = outputFormat();
+    if (fmt === "sameAsInput") {
+      return { kind: "sameAsInput" };
+    }
     if (fmt === "jpeg") {
       return { kind: "jpeg", quality: jpegQuality() };
     }
@@ -235,7 +249,7 @@ export const App: Component = () => {
 
     const effFormat = getEffectiveOutputFormat();
     const effOverwrite = overwrite();
-    const effTileSize = selectedTileSize() ?? settings().tileSizeOverride ?? null;
+    const effTileSize = selectedTileSize();
     const effProvider = selectedProvider() === "automatic" ? null : selectedProvider();
 
     if (specificJobId) {
@@ -290,6 +304,12 @@ export const App: Component = () => {
       } catch (err) {
         console.warn("Failed to resume queue:", err);
       }
+    } else {
+      try {
+        await processNextJob();
+      } catch (err) {
+        console.warn("Failed to trigger processNextJob:", err);
+      }
     }
     await syncQueueState();
   };
@@ -322,7 +342,7 @@ export const App: Component = () => {
     const targetOutDir = customOutputDir().trim() || settings().outputDirectory || "";
     const effFormat = getEffectiveOutputFormat();
     const effOverwrite = overwrite();
-    const effTileSize = selectedTileSize() ?? settings().tileSizeOverride ?? null;
+    const effTileSize = selectedTileSize();
     const effProvider = selectedProvider() === "automatic" ? null : selectedProvider();
 
     let failureCount = 0;
@@ -433,9 +453,7 @@ export const App: Component = () => {
     if (m && m.nativeScales && m.nativeScales.length > 0) {
       setTargetScale(m.nativeScales[0]);
     }
-    if (m && m.variants && m.variants.length > 0) {
-      setSelectedVariantId(m.variants[0].id);
-    }
+    setSelectedVariantId(m?.variants?.[0]?.id ?? "default");
   };
 
   const handleToggleModelInstall = async (modelId: string) => {
@@ -448,22 +466,28 @@ export const App: Component = () => {
         await uninstallModel(modelId);
       } catch (err) {
         console.error("Failed to uninstall model:", err);
-        // Refresh anyway so the UI is consistent with backend state.
       }
       try {
         const refreshed = await listModels();
         setModels(refreshed);
       } catch {
-        // Fall back to optimistic local update if refresh fails.
         setModels((prev) =>
           prev.map((m) => (m.id === modelId ? { ...m, installed: false } : m))
         );
       }
     } else {
-      // Install: not yet supported (requires download infrastructure).
-      alert(
-        "Offline installation only: place the model package in the models directory and restart Resvera."
-      );
+      // Install / Download model
+      try {
+        setInstallingModelId(modelId);
+        await installModel(modelId);
+        const refreshed = await listModels();
+        setModels(refreshed);
+      } catch (err: any) {
+        console.error("Failed to install model:", err);
+        alert(err?.message || String(err));
+      } finally {
+        setInstallingModelId(null);
+      }
     }
   };
 
@@ -518,6 +542,12 @@ export const App: Component = () => {
                       ? "bg-emerald-950/80 text-emerald-400 border-emerald-800"
                       : currentJob()?.state === "running"
                       ? "bg-sky-950/80 text-sky-400 border-sky-800 animate-pulse"
+                      : currentJob()?.state === "failed" || currentJob()?.state === "interrupted"
+                      ? "bg-rose-950/80 text-rose-400 border-rose-800"
+                      : currentJob()?.state === "cancelled"
+                      ? "bg-amber-950/80 text-amber-400 border-amber-800"
+                      : currentJob()?.state === "preparing" || currentJob()?.state === "finalizing"
+                      ? "bg-sky-950/80 text-sky-400 border-sky-800 animate-pulse"
                       : "bg-slate-800 text-slate-400 border-slate-700"
                   }`}
                 >
@@ -525,6 +555,16 @@ export const App: Component = () => {
                     ? `✓ ${t("queue.completed")}`
                     : currentJob()?.state === "running"
                     ? `⏳ ${t("queue.processing")}...`
+                    : currentJob()?.state === "failed"
+                    ? `✕ ${t("queue.failed")}`
+                    : currentJob()?.state === "cancelled"
+                    ? `⊘ ${t("queue.cancelled")}`
+                    : currentJob()?.state === "interrupted"
+                    ? `⚠ ${t("queue.interrupted")}`
+                    : currentJob()?.state === "preparing"
+                    ? `⏳ ${t("queue.preparing")}...`
+                    : currentJob()?.state === "finalizing"
+                    ? `⏳ ${t("queue.finalizing")}...`
                     : `• ${t("queue.queued")}`}
                 </span>
               </div>
@@ -549,8 +589,8 @@ export const App: Component = () => {
 
           <div class="flex-1 min-h-0">
             <ComparisonViewer
-              beforeUrl={currentJob()?.previewPath || currentJob()?.inputPath || null}
-              afterUrl={currentJob()?.outputPath || null}
+              beforeUrl={currentJob()?.inputPath || null}
+              afterUrl={currentJob()?.outputPath || currentJob()?.previewPath || null}
               isProcessing={currentJob()?.state === "running"}
               progressPercent={Math.round((currentJob()?.progress?.fraction || 0) * 100)}
               progressStage={currentJob()?.progress?.stage}
@@ -568,7 +608,7 @@ export const App: Component = () => {
                 {t("controls.title")}
               </h2>
               <span class="text-[10px] text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/80">
-                100% Offline Ready
+                On-Device AI
               </span>
             </div>
 
@@ -704,10 +744,28 @@ export const App: Component = () => {
                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
                     >
                       <option value="automatic">{t("controls.providerOptions.auto")}</option>
-                      <option value="directml">{t("controls.providerOptions.directml")}</option>
-                      <option value="coreml">{t("controls.providerOptions.coreml")}</option>
-                      <option value="cuda">{t("controls.providerOptions.cuda")}</option>
                       <option value="cpu">{t("controls.providerOptions.cpu")}</option>
+                      <option
+                        value="directml"
+                        disabled={!(runtimeStatus()?.providers.map((p) => p.id) || ["cpu"]).includes("directml")}
+                      >
+                        {t("controls.providerOptions.directml")}
+                        {!(runtimeStatus()?.providers.map((p) => p.id) || ["cpu"]).includes("directml") ? " (CPU only build)" : ""}
+                      </option>
+                      <option
+                        value="coreml"
+                        disabled={!(runtimeStatus()?.providers.map((p) => p.id) || ["cpu"]).includes("coreml")}
+                      >
+                        {t("controls.providerOptions.coreml")}
+                        {!(runtimeStatus()?.providers.map((p) => p.id) || ["cpu"]).includes("coreml") ? " (CPU only build)" : ""}
+                      </option>
+                      <option
+                        value="cuda"
+                        disabled={!(runtimeStatus()?.providers.map((p) => p.id) || ["cpu"]).includes("cuda")}
+                      >
+                        {t("controls.providerOptions.cuda")}
+                        {!(runtimeStatus()?.providers.map((p) => p.id) || ["cpu"]).includes("cuda") ? " (CPU only build)" : ""}
+                      </option>
                     </select>
                   </div>
 
@@ -992,6 +1050,7 @@ export const App: Component = () => {
         isOpen={isModelCenterOpen()}
         models={models()}
         modelsDirectory={settings().modelsDirectory}
+        installingModelId={installingModelId()}
         onClose={() => setIsModelCenterOpen(false)}
         onToggleInstall={handleToggleModelInstall}
         onOpenSettings={() => setIsSettingsOpen(true)}
