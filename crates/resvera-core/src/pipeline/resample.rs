@@ -3,8 +3,8 @@ use fast_image_resize::images::Image;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, Resizer};
 use image::{GrayImage, RgbImage};
 
-/// Performs high-quality Lanczos3 resampling to target dimensions.
-pub fn downsample_lanczos3(
+/// Performs high-quality Lanczos3 resampling to target dimensions (upsampling or downsampling).
+pub fn resample_rgb_lanczos3(
     src: &RgbImage,
     target_width: u32,
     target_height: u32,
@@ -40,6 +40,15 @@ pub fn downsample_lanczos3(
     })?;
 
     Ok(dst_img)
+}
+
+/// Compatibility alias for downsampling.
+pub fn downsample_lanczos3(
+    src: &RgbImage,
+    target_width: u32,
+    target_height: u32,
+) -> Result<RgbImage, PipelineError> {
+    resample_rgb_lanczos3(src, target_width, target_height)
 }
 
 /// Performs high-quality Lanczos3 resampling to target dimensions for single-channel (e.g. Alpha mask) images.

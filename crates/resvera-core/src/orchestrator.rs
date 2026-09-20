@@ -6,7 +6,8 @@ use crate::pipeline::atomic::{
     atomic_save_image, atomic_save_image_with_alpha, generate_output_path,
 };
 use crate::pipeline::io::{load_image_with_alpha, OutputFormat};
-use crate::pipeline::resample::downsample_lanczos3;
+use crate::pipeline::naming::strip_verbatim_prefix;
+use crate::pipeline::resample::{downsample_lanczos3, resample_rgb_lanczos3};
 use crate::pipeline::tiling::{TileBlender, TilePlan};
 use image::RgbImage;
 use resvera_models::{InstallerError, ModelInstaller, ModelManifest, ResolvedModel};
@@ -39,6 +40,7 @@ pub enum OrchestratorError {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpscaleJobRequest {
     pub input_path: String,
     pub output_directory: String,
@@ -52,12 +54,14 @@ pub struct UpscaleJobRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BatchJobRequest {
     pub inputs: Vec<String>,
     pub defaults: BatchJobDefaults,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BatchJobDefaults {
     pub output_directory: String,
     pub model_id: String,
@@ -401,21 +405,8 @@ impl JobOrchestrator {
             let expected_height = tile_rect.height.checked_mul(native_scale).ok_or_else(|| {
                 OrchestratorError::Validation("Upscaled tile height overflowed".into())
             })?;
-            if out_tile.width() < expected_width || out_tile.height() < expected_height {
-                return Err(OrchestratorError::Pipeline(
-                    PipelineError::DimensionMismatch(format!(
-                        "Model produced {}x{} for a tile requiring {}x{}",
-                        out_tile.width(),
-                        out_tile.height(),
-                        expected_width,
-                        expected_height
-                    )),
-                ));
-            }
             if out_tile.width() != expected_width || out_tile.height() != expected_height {
-                out_tile =
-                    image::imageops::crop_imm(&out_tile, 0, 0, expected_width, expected_height)
-                        .to_image();
+                out_tile = resample_rgb_lanczos3(&out_tile, expected_width, expected_height)?;
             }
 
             blender.blend_tile(tile_rect, &out_tile, plan.overlap);
@@ -532,7 +523,10 @@ impl JobOrchestrator {
             atomic_save_image(&preview_img, &preview_path, &OutputFormat::Png, None)?;
             cancel.check()?;
 
-            let output_path = target_path
+            let clean_output_path = strip_verbatim_prefix(&target_path);
+            let clean_preview_path = strip_verbatim_prefix(&preview_path);
+
+            let output_path = clean_output_path
                 .to_str()
                 .ok_or_else(|| {
                     OrchestratorError::Validation(
@@ -540,7 +534,7 @@ impl JobOrchestrator {
                     )
                 })?
                 .to_string();
-            let preview_path_string = preview_path
+            let preview_path_string = clean_preview_path
                 .to_str()
                 .ok_or_else(|| {
                     OrchestratorError::Validation(
@@ -629,7 +623,7 @@ fn validated_tile_size(
     let tile_size = requested.unwrap_or(constraints.recommended);
     if tile_size < constraints.minimum
         || tile_size <= constraints.overlap
-        || !tile_size.is_multiple_of(constraints.alignment)
+        || (constraints.alignment > 0 && !tile_size.is_multiple_of(constraints.alignment))
     {
         return Err(OrchestratorError::Validation(format!(
             "Tile size {tile_size} violates model constraints: minimum {}, overlap {}, alignment {}",

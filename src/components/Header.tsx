@@ -20,6 +20,14 @@ export const Header: Component<HeaderProps> = (props) => {
   const [isMaximized, setIsMaximized] = createSignal(false);
 
   onMount(async () => {
+    let handleResize: (() => void) | undefined;
+
+    onCleanup(() => {
+      if (handleResize) {
+        window.removeEventListener("resize", handleResize);
+      }
+    });
+
     if (isTauri()) {
       try {
         const max = await isWindowMaximized();
@@ -29,7 +37,7 @@ export const Header: Component<HeaderProps> = (props) => {
       }
     }
 
-    const handleResize = async () => {
+    handleResize = async () => {
       if (isTauri()) {
         try {
           const max = await isWindowMaximized();
@@ -41,9 +49,6 @@ export const Header: Component<HeaderProps> = (props) => {
     };
 
     window.addEventListener("resize", handleResize);
-    onCleanup(() => {
-      window.removeEventListener("resize", handleResize);
-    });
   });
 
   const handleMinimize = async (e: MouseEvent) => {
@@ -112,7 +117,14 @@ export const Header: Component<HeaderProps> = (props) => {
           <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
           <span class="text-emerald-300 font-medium">{t("app.offlineMode")}</span>
           <span class="text-slate-500">|</span>
-          <span class="text-slate-300">ORT: CPU / DirectML</span>
+          <span class="text-slate-300">
+            {props.status
+              ? `${props.status.engine.id.toUpperCase()}: ${props.status.providers
+                  .filter((p) => p.available)
+                  .map((p) => p.id.toUpperCase())
+                  .join(" / ") || "No Provider"}`
+              : "Initializing..."}
+          </span>
         </div>
 
         <button

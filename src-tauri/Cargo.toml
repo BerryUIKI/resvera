@@ -17,6 +17,7 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+base64 = { workspace = true }
 tauri = { workspace = true }
 rfd = "0.15"
 

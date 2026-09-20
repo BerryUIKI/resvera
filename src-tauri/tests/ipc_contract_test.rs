@@ -30,6 +30,22 @@ fn test_ipc_types_serialization_rules() {
     };
     let err_json = serde_json::to_string(&error).unwrap();
     assert!(err_json.contains("\"code\":\"modelNotFound\""));
+
+    let req_json = r#"{
+        "inputPath": "/path/to/img.png",
+        "outputDirectory": "/out",
+        "modelId": "realesrgan-x4plus",
+        "modelVariantId": "default",
+        "targetScale": 4,
+        "outputFormat": {"kind": "png"},
+        "overwrite": false,
+        "tileSize": 256,
+        "providerPreference": "cpu"
+    }"#;
+    let parsed_req: CoreJobRequest = serde_json::from_str(req_json).unwrap();
+    assert_eq!(parsed_req.input_path, "/path/to/img.png");
+    assert_eq!(parsed_req.model_variant_id, "default");
+    assert_eq!(parsed_req.tile_size, Some(256));
 }
 
 #[test]
@@ -426,6 +442,64 @@ fn test_uninstall_model_success_and_validation() {
 }
 
 #[test]
+fn test_install_model_success_and_validation() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let models_root = temp.path().join("models");
+
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    );
+    let settings_path = temp.path().join("settings.json");
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(models_root.clone())),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path,
+        staging_dir: temp.path().join("staging"),
+    };
+
+    // Initially not installed
+    let models_before = list_models_impl(&state.models_root.lock().unwrap());
+    assert!(models_before
+        .iter()
+        .any(|m| m.id == "realesrgan-x4plus" && !m.installed));
+
+    // Invalid model ID rejected
+    assert_eq!(
+        install_model_impl(&state, "".into()).unwrap_err().code,
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        install_model_impl(&state, "invalid/id".into())
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        install_model_impl(&state, "nonexistent-model".into())
+            .unwrap_err()
+            .code,
+        ErrorCode::ModelNotFound
+    );
+
+    // Install model
+    let summary = install_model_impl(&state, "realesrgan-x4plus".into()).unwrap();
+    assert!(summary.installed);
+    assert_eq!(summary.id, "realesrgan-x4plus");
+
+    // Check list_models_impl now reports installed: true
+    let models_after = list_models_impl(&state.models_root.lock().unwrap());
+    assert!(models_after
+        .iter()
+        .any(|m| m.id == "realesrgan-x4plus" && m.installed));
+}
+
+#[test]
 fn test_save_settings_dynamic_models_root() {
     let temp = tempdir().unwrap();
     let db = AppDatabase::new_in_memory().unwrap();
@@ -512,7 +586,8 @@ fn test_stage_input_image_validation_and_staging() {
 
     let staged_path = PathBuf::from(&staged_path_str);
     assert!(staged_path.exists());
-    let canonical_staging = staging_dir.canonicalize().unwrap_or(staging_dir);
+    let canonical_staging =
+        resvera_core::strip_verbatim_prefix(staging_dir.canonicalize().unwrap_or(staging_dir));
     assert!(staged_path.starts_with(&canonical_staging));
     assert!(staged_path_str.ends_with("my_photo.PNG"));
 

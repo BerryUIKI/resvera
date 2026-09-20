@@ -60,3 +60,16 @@ pub fn format_output_filename(
 
     format!("{}.{}", safe_formatted, safe_ext)
 }
+
+/// Normalizes Windows verbatim / extended-length path prefixes (e.g. `\\?\D:\...` or `\\?\UNC\...`)
+/// to clean standard paths that are safe for WebViews, URL protocols, and UI display.
+pub fn strip_verbatim_prefix<P: AsRef<std::path::Path>>(path: P) -> std::path::PathBuf {
+    let p_str = path.as_ref().to_string_lossy();
+    if let Some(stripped) = p_str.strip_prefix(r"\\?\UNC\") {
+        std::path::PathBuf::from(format!(r"\\{stripped}"))
+    } else if let Some(stripped) = p_str.strip_prefix(r"\\?\") {
+        std::path::PathBuf::from(stripped)
+    } else {
+        path.as_ref().to_path_buf()
+    }
+}

@@ -85,6 +85,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_runtime_status,
             list_models,
+            install_model,
             uninstall_model,
             create_upscale_job,
             create_batch_jobs,
@@ -103,6 +104,7 @@ fn main() {
             toggle_maximize_window,
             is_window_maximized,
             close_window,
+            read_image_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Resvera desktop application");
