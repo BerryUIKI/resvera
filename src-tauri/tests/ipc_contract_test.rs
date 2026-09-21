@@ -5,6 +5,7 @@ use resvera_desktop::worker::QueueWorker;
 use resvera_engine_ort::OrtEngine;
 use resvera_models::{compute_file_sha256, ModelInstaller};
 use resvera_persistence::{AppDatabase, JobRecord};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -68,6 +69,7 @@ fn test_ipc_commands_workflow() {
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path,
         staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // 1. Get runtime status
@@ -160,6 +162,7 @@ fn test_settings_transactional_failure_does_not_mutate_in_memory() {
         settings: Arc::new(Mutex::new(initial.clone())),
         settings_path: invalid_settings_path,
         staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let mut modified = initial.clone();
@@ -272,6 +275,7 @@ fn test_background_queue_worker_execution() {
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path,
         staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let input_path = temp.path().join("worker_photo.png");
@@ -444,6 +448,7 @@ fn test_uninstall_model_success_and_validation() {
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path,
         staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // Verify model is initially installed
@@ -549,6 +554,7 @@ fn test_install_model_success_and_validation() {
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path,
         staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // Initially not installed
@@ -609,6 +615,7 @@ fn test_save_settings_dynamic_models_root() {
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path,
         staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // Initially uses root_a where model is installed
@@ -654,6 +661,7 @@ fn test_stage_input_image_validation_and_staging() {
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path: temp.path().join("settings.json"),
         staging_dir: staging_dir.clone(),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // 1. Rejects empty data
@@ -712,6 +720,7 @@ fn test_retry_job_ipc_workflow_and_active_state_rejection() {
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path: temp.path().join("settings.json"),
         staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let input_path = temp.path().join("sample.png");
@@ -794,6 +803,7 @@ fn test_coordinated_application_shutdown() {
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path: temp.path().join("settings.json"),
         staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let in_path = temp.path().join("shutdown_input.png");
@@ -858,6 +868,7 @@ fn test_job_history_bounded_cursor_pagination_workflow() {
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path: temp.path().join("settings.json"),
         staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // Insert 5 completed jobs with deterministic timestamps into DB
@@ -936,6 +947,7 @@ fn test_job_history_validation_and_bounds() {
         settings: Arc::new(Mutex::new(AppSettings::default())),
         settings_path: temp.path().join("settings.json"),
         staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // 1. Limit = 0 must be rejected with validation error
@@ -954,4 +966,152 @@ fn test_job_history_validation_and_bounds() {
     assert!(invalid_cursor_res.is_err());
     let err = invalid_cursor_res.unwrap_err();
     assert_eq!(err.code, ErrorCode::InvalidArgument);
+}
+
+#[test]
+fn test_streaming_staging_upload_lifecycle() {
+    use base64::Engine;
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let models_root = temp.path().join("models");
+    let staging_dir = temp.path().join("staging");
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    )
+    .with_staging_dir(&staging_dir);
+
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(models_root)),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path: temp.path().join("settings.json"),
+        staging_dir: staging_dir.clone(),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    // 1. Start upload session
+    let session_id = start_staging_upload_impl(&state, "stream_test.png".to_string()).unwrap();
+
+    // 2. Append chunks (Valid PNG header: 8 bytes, followed by chunk data)
+    let png_header = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    let chunk1_b64 = base64::engine::general_purpose::STANDARD.encode(&png_header[0..4]);
+    let chunk2_b64 = base64::engine::general_purpose::STANDARD.encode(&png_header[4..8]);
+
+    append_staging_chunk_impl(&state, &session_id, &chunk1_b64).unwrap();
+    append_staging_chunk_impl(&state, &session_id, &chunk2_b64).unwrap();
+
+    // 3. Finish upload session
+    let staged_path_str = finish_staging_upload_impl(&state, &session_id).unwrap();
+    let staged_path = PathBuf::from(&staged_path_str);
+    assert!(staged_path.exists());
+    assert!(staged_path.is_file());
+
+    // Verify session was cleaned up
+    assert!(state.staging_sessions.lock().unwrap().is_empty());
+
+    // 4. Abort upload test (creates temp file and verifies deletion on abort)
+    let abort_session = start_staging_upload_impl(&state, "abort_test.png".to_string()).unwrap();
+    append_staging_chunk_impl(&state, &abort_session, &chunk1_b64).unwrap();
+    let temp_file = staging_dir.join(format!(".upload_{abort_session}.tmp"));
+    assert!(temp_file.exists());
+
+    abort_staging_upload_impl(&state, &abort_session).unwrap();
+    assert!(!temp_file.exists(), "Aborted staging file must be deleted");
+
+    // 5. Single-shot base64 staging
+    let full_b64 = base64::engine::general_purpose::STANDARD.encode(&png_header);
+    let b64_staged =
+        stage_input_image_base64_impl(&state, "b64_test.png".to_string(), full_b64).unwrap();
+    assert!(PathBuf::from(&b64_staged).exists());
+}
+
+#[test]
+fn test_staging_disk_leak_prevention_on_job_completion() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::open(temp.path().join("test.db")).unwrap();
+    let models_root = temp.path().join("models");
+    install_test_model(&models_root);
+
+    let staging_dir = temp.path().join("staging");
+    std::fs::create_dir_all(&staging_dir).unwrap();
+
+    let engine = Arc::new(OrtEngine::new());
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    )
+    .with_staging_dir(&staging_dir);
+
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(models_root)),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path: temp.path().join("settings.json"),
+        staging_dir: staging_dir.clone(),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    // Stage an image
+    let img = image::RgbImage::new(32, 32);
+    let mut raw_png = Vec::new();
+    let mut cursor = std::io::Cursor::new(&mut raw_png);
+    img.write_to(&mut cursor, image::ImageFormat::Png).unwrap();
+
+    let staged_path_str =
+        stage_input_image_impl(&state, "photo.png".into(), raw_png.clone()).unwrap();
+    let staged_path = PathBuf::from(&staged_path_str);
+    assert!(staged_path.exists());
+
+    // Submit job referencing staged input
+    let req = CoreJobRequest {
+        input_path: staged_path_str.clone(),
+        output_directory: temp.path().to_str().unwrap().to_string(),
+        model_id: "realesrgan-x4plus".to_string(),
+        model_variant_id: "default".to_string(),
+        target_scale: 4,
+        output_format: OutputFormat::Png,
+        overwrite: false,
+        tile_size: Some(32),
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
+        provider_preference: Some("cpu".to_string()),
+    };
+
+    let job = create_upscale_job_impl(&state, req.clone()).unwrap();
+    assert_eq!(job.state, "queued");
+    assert!(staged_path.exists(), "Staged path must exist while queued");
+
+    // Execute job
+    let completed = state.orchestrator.process_next_job().unwrap().unwrap();
+    // With dummy model weights, execution fails closed truthfully
+    assert_eq!(completed.state, "failed");
+
+    // Verify zero disk leak: staged input file must be removed upon terminal state!
+    assert!(
+        !staged_path.exists(),
+        "Staged image file must be deleted after job completion to prevent disk leaks"
+    );
+
+    // 2. Cancellation test: cancel a queued job referencing staged input
+    let staged_path_str2 = stage_input_image_impl(&state, "photo2.png".into(), raw_png).unwrap();
+    let staged_path2 = PathBuf::from(&staged_path_str2);
+    assert!(staged_path2.exists());
+
+    let mut req2 = req;
+    req2.input_path = staged_path_str2;
+    let job2 = create_upscale_job_impl(&state, req2).unwrap();
+    assert_eq!(job2.state, "queued");
+
+    cancel_job_impl(&state, &job2.id).unwrap();
+    assert!(
+        !staged_path2.exists(),
+        "Staged image file must be deleted on job cancellation"
+    );
 }

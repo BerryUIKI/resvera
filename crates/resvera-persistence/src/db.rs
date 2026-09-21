@@ -108,6 +108,7 @@ impl AppDatabase {
             CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state);
             CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
             CREATE INDEX IF NOT EXISTS idx_jobs_created_at_id ON jobs(created_at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_jobs_input_path ON jobs(input_path);
 
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -277,6 +278,18 @@ impl AppDatabase {
         let conn = self.conn.lock().unwrap();
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM jobs WHERE input_path = ?1 AND state IN ('queued', 'preparing', 'running', 'finalizing')",
+            params![input_path],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    /// Checks if there is any active or recoverable job referencing the specified input path.
+    /// Used to prevent deleting staged input files while work is queued, active, or interrupted.
+    pub fn has_recoverable_job_for_input(&self, input_path: &str) -> Result<bool, DatabaseError> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM jobs WHERE input_path = ?1 AND state IN ('queued', 'preparing', 'running', 'finalizing', 'interrupted')",
             params![input_path],
             |row| row.get(0),
         )?;
