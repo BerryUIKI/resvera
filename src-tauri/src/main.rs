@@ -22,28 +22,53 @@ fn main() {
                 .app_cache_dir()
                 .unwrap_or_else(|_| app_data_dir.join("cache"));
 
-            let _ = std::fs::create_dir_all(&app_data_dir);
-            let _ = std::fs::create_dir_all(&app_cache_dir);
+            std::fs::create_dir_all(&app_data_dir).map_err(|e| {
+                format!(
+                    "Failed to create app data directory '{}': {}",
+                    app_data_dir.display(),
+                    e
+                )
+            })?;
+            std::fs::create_dir_all(&app_cache_dir).map_err(|e| {
+                format!(
+                    "Failed to create app cache directory '{}': {}",
+                    app_cache_dir.display(),
+                    e
+                )
+            })?;
 
             let db_path = app_data_dir.join("resvera.db");
             let preview_dir = app_cache_dir.join("previews");
-            let _ = std::fs::create_dir_all(&preview_dir);
+            std::fs::create_dir_all(&preview_dir).map_err(|e| {
+                format!(
+                    "Failed to create previews directory '{}': {}",
+                    preview_dir.display(),
+                    e
+                )
+            })?;
 
             let staging_dir = app_cache_dir.join("staging");
-            let _ = std::fs::create_dir_all(&staging_dir);
+            std::fs::create_dir_all(&staging_dir).map_err(|e| {
+                format!(
+                    "Failed to create staging directory '{}': {}",
+                    staging_dir.display(),
+                    e
+                )
+            })?;
 
             let default_models_dir = std::env::var_os("RESVERA_MODELS_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| app_data_dir.join("models"));
 
             let settings_path = app_data_dir.join("settings.json");
-            let initial_settings: AppSettings = if settings_path.exists() {
-                std::fs::read_to_string(&settings_path)
-                    .ok()
-                    .and_then(|s| serde_json::from_str(&s).ok())
-                    .unwrap_or_default()
-            } else {
-                AppSettings::default()
+            let initial_settings = match load_or_migrate_settings(&settings_path) {
+                Ok(settings) => settings,
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to load or migrate settings: {e}. Default settings will be used; invalid settings preserved for diagnosis."
+                    );
+                    AppSettings::default()
+                }
             };
 
             // If the user previously configured a custom models directory, honour it;
@@ -55,10 +80,24 @@ fn main() {
                 .map(PathBuf::from)
                 .unwrap_or(default_models_dir);
 
-            let _ = std::fs::create_dir_all(&models_dir);
+            std::fs::create_dir_all(&models_dir).map_err(|e| {
+                format!(
+                    "Failed to create models directory '{}': {}",
+                    models_dir.display(),
+                    e
+                )
+            })?;
 
-            let db = AppDatabase::open(&db_path).expect("Failed to initialize job database");
-            let _ = db.run_crash_recovery_sweep();
+            let db = AppDatabase::open(&db_path).map_err(|e| {
+                format!(
+                    "Failed to initialize job database '{}': {}",
+                    db_path.display(),
+                    e
+                )
+            })?;
+            db.run_crash_recovery_sweep().map_err(|e| {
+                format!("Failed to run database crash recovery sweep: {}", e)
+            })?;
 
             let engine = Arc::new(OrtEngine::new());
             let orchestrator =

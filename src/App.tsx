@@ -88,6 +88,7 @@ export const App: Component = () => {
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
   const [isModelCenterOpen, setIsModelCenterOpen] = createSignal(false);
   const [installingModelId, setInstallingModelId] = createSignal<string | null>(null);
+  const [systemError, setSystemError] = createSignal<string | null>(null);
 
   const syncQueueState = async () => {
     if (!isTauri()) return;
@@ -120,8 +121,11 @@ export const App: Component = () => {
       } else if (selectedJobId() && !history.jobs.some((j) => j.id === selectedJobId())) {
         setSelectedJobId(history.jobs.length > 0 ? history.jobs[0].id : null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn("Failed to sync queue state from backend:", err);
+      if (err?.code === "storageFailure") {
+        setSystemError(err?.message || "Storage failure detected in queue synchronization.");
+      }
     }
   };
 
@@ -205,8 +209,9 @@ export const App: Component = () => {
         }
       }
       await syncQueueState();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to initialize backend runtime or settings:", err);
+      setSystemError(err?.message || String(err));
     }
 
     syncInterval = setInterval(() => {
@@ -527,6 +532,22 @@ export const App: Component = () => {
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenModelCenter={() => setIsModelCenterOpen(true)}
       />
+
+      <Show when={systemError()}>
+        <div class="bg-rose-950/90 border-b border-rose-800 text-rose-200 px-6 py-2 flex items-center justify-between text-xs select-none">
+          <div class="flex items-center space-x-2 min-w-0">
+            <span class="font-bold uppercase tracking-wider text-rose-400">⚠ System Error:</span>
+            <span class="truncate">{systemError()}</span>
+          </div>
+          <button
+            onClick={() => setSystemError(null)}
+            class="text-rose-400 hover:text-rose-200 font-bold px-2 py-0.5 ml-4 rounded hover:bg-rose-900/50"
+            title="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      </Show>
 
       <div class="flex flex-1 overflow-hidden">
         {/* Left Sidebar: Queue & Batch List */}

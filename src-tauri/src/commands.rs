@@ -1129,7 +1129,7 @@ pub fn create_upscale_job_impl(
     state: &AppState,
     mut req: CoreJobRequest,
 ) -> Result<JobSnapshot, ApiError> {
-    let settings = load_settings_impl(state);
+    let settings = load_settings_impl(state)?;
     if req.provider_preference.is_none() {
         if let ProviderPreference::Specific { provider_id } = &settings.provider_preference {
             req.provider_preference = Some(provider_id.clone());
@@ -1179,7 +1179,7 @@ pub fn create_batch_jobs_impl(
     state: &AppState,
     mut req: CoreBatchRequest,
 ) -> Result<Vec<JobSnapshot>, ApiError> {
-    let settings = load_settings_impl(state);
+    let settings = load_settings_impl(state)?;
     if req.defaults.provider_preference.is_none() {
         if let ProviderPreference::Specific { provider_id } = &settings.provider_preference {
             req.defaults.provider_preference = Some(provider_id.clone());
@@ -1286,43 +1286,57 @@ pub fn retry_job(
     retry_job_impl(&state, &job_id)
 }
 
-pub fn pause_queue_impl(state: &AppState) -> QueueSnapshot {
+pub fn pause_queue_impl(state: &AppState) -> Result<QueueSnapshot, ApiError> {
     state.orchestrator.pause_queue();
     get_queue_impl(state)
 }
 
 #[tauri::command]
-pub fn pause_queue(state: tauri::State<'_, AppState>) -> QueueSnapshot {
+pub fn pause_queue(state: tauri::State<'_, AppState>) -> Result<QueueSnapshot, ApiError> {
     pause_queue_impl(&state)
 }
 
-pub fn resume_queue_impl(state: &AppState) -> QueueSnapshot {
+pub fn resume_queue_impl(state: &AppState) -> Result<QueueSnapshot, ApiError> {
     state.orchestrator.resume_queue();
     get_queue_impl(state)
 }
 
 #[tauri::command]
-pub fn resume_queue(state: tauri::State<'_, AppState>) -> QueueSnapshot {
+pub fn resume_queue(state: tauri::State<'_, AppState>) -> Result<QueueSnapshot, ApiError> {
     resume_queue_impl(&state)
 }
 
-pub fn get_queue_impl(state: &AppState) -> QueueSnapshot {
-    let active = state.orchestrator.db.get_active_job_id().ok().flatten();
+pub fn get_queue_impl(state: &AppState) -> Result<QueueSnapshot, ApiError> {
+    let active = state
+        .orchestrator
+        .db
+        .get_active_job_id()
+        .map_err(|e| ApiError {
+            code: ErrorCode::StorageFailure,
+            message: format!("Failed to read active job from database: {e}"),
+            details: None,
+            retryable: false,
+        })?;
     let queued = state
         .orchestrator
         .db
         .get_queued_job_ids()
-        .unwrap_or_default();
-    QueueSnapshot {
+        .map_err(|e| ApiError {
+            code: ErrorCode::StorageFailure,
+            message: format!("Failed to read queued jobs from database: {e}"),
+            details: None,
+            retryable: false,
+        })?;
+    Ok(QueueSnapshot {
         paused: state.orchestrator.is_paused(),
         active_job_id: active,
         queued_job_ids: queued,
         revision: format!("rev-{}", chrono::Utc::now().timestamp_millis()),
-    }
+    })
 }
 
 #[tauri::command]
-pub fn get_queue(state: tauri::State<'_, AppState>) -> QueueSnapshot {
+pub fn get_queue(state: tauri::State<'_, AppState>) -> Result<QueueSnapshot, ApiError> {
     get_queue_impl(&state)
 }
 
@@ -1411,6 +1425,187 @@ pub fn list_job_history(
     get_jobs_history_impl(&state, limit, cursor)
 }
 
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 1;
+
+pub fn preserve_invalid_settings_file(path: &Path, reason: &str) -> PathBuf {
+    let timestamp = chrono::Utc::now().timestamp_millis();
+    let backup_path = path.with_extension(format!("json.{reason}.{timestamp}"));
+    let _ = std::fs::copy(path, &backup_path);
+    backup_path
+}
+
+fn migrate_settings_v0_to_v1(mut val: serde_json::Value) -> Result<AppSettings, ApiError> {
+    let obj = match val.as_object_mut() {
+        Some(o) => o,
+        None => {
+            return Err(ApiError {
+                code: ErrorCode::InvalidArgument,
+                message: "Settings JSON root must be an object".to_string(),
+                details: None,
+                retryable: false,
+            });
+        }
+    };
+
+    // Migrate legacy metadataPolicy: "strip" -> "stripAll"
+    if let Some(mp) = obj
+        .get("metadataPolicy")
+        .or_else(|| obj.get("metadata_policy"))
+    {
+        if mp == "strip" {
+            obj.insert(
+                "metadataPolicy".to_string(),
+                serde_json::Value::String("stripAll".to_string()),
+            );
+        }
+    }
+
+    // Ensure schemaVersion is set to 1
+    obj.insert("schemaVersion".to_string(), serde_json::Value::from(1));
+
+    // Convert snake_case legacy keys to camelCase if present
+    let keys_to_convert = [
+        ("output_directory", "outputDirectory"),
+        ("models_directory", "modelsDirectory"),
+        ("output_format", "outputFormat"),
+        ("default_model_id", "defaultModelId"),
+        ("default_model_variant_id", "defaultModelVariantId"),
+        ("default_target_scale", "defaultTargetScale"),
+        ("naming_template", "namingTemplate"),
+        ("metadata_policy", "metadataPolicy"),
+        ("preserve_gps", "preserveGps"),
+        ("provider_preference", "providerPreference"),
+        ("tile_size_override", "tileSizeOverride"),
+        ("tile_overlap", "tileOverlap"),
+        ("blend_mode", "blendMode"),
+        ("gpu_device_id", "gpuDeviceId"),
+        ("overwrite_existing", "overwriteExisting"),
+        ("check_for_updates", "checkForUpdates"),
+    ];
+
+    for (snake, camel) in keys_to_convert {
+        if let Some(v) = obj.remove(snake) {
+            obj.entry(camel.to_string()).or_insert(v);
+        }
+    }
+
+    // Merge into AppSettings defaults for any missing fields
+    let default_val = serde_json::to_value(AppSettings::default()).map_err(|e| ApiError {
+        code: ErrorCode::Internal,
+        message: format!("Failed to serialize default settings: {e}"),
+        details: None,
+        retryable: false,
+    })?;
+
+    let mut merged = default_val.as_object().unwrap().clone();
+    for (k, v) in obj.iter() {
+        merged.insert(k.clone(), v.clone());
+    }
+
+    let merged_val = serde_json::Value::Object(merged);
+    let settings: AppSettings = serde_json::from_value(merged_val).map_err(|e| ApiError {
+        code: ErrorCode::InvalidArgument,
+        message: format!("Failed to parse migrated settings v0->v1: {e}"),
+        details: None,
+        retryable: false,
+    })?;
+
+    Ok(settings)
+}
+
+pub fn load_or_migrate_settings(path: &Path) -> Result<AppSettings, ApiError> {
+    if !path.exists() {
+        return Ok(AppSettings::default());
+    }
+
+    let content = std::fs::read_to_string(path).map_err(|e| ApiError {
+        code: match e.kind() {
+            std::io::ErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
+            _ => ErrorCode::StorageFailure,
+        },
+        message: format!("Failed to read settings file '{}': {}", path.display(), e),
+        details: None,
+        retryable: false,
+    })?;
+
+    let val: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(e) => {
+            let backup_path = preserve_invalid_settings_file(path, "corrupt");
+            return Err(ApiError {
+                code: ErrorCode::StorageFailure,
+                message: format!(
+                    "Malformed settings JSON (original preserved at '{}'): {}",
+                    backup_path.display(),
+                    e
+                ),
+                details: None,
+                retryable: false,
+            });
+        }
+    };
+
+    let schema_version = val
+        .get("schemaVersion")
+        .or_else(|| val.get("schema_version"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+
+    if schema_version > CURRENT_SETTINGS_SCHEMA_VERSION {
+        let backup_path = preserve_invalid_settings_file(path, "incompatible");
+        return Err(ApiError {
+            code: ErrorCode::InvalidArgument,
+            message: format!(
+                "Unsupported settings schema version {} (supported: {}, original preserved at '{}')",
+                schema_version,
+                CURRENT_SETTINGS_SCHEMA_VERSION,
+                backup_path.display()
+            ),
+            details: None,
+            retryable: false,
+        });
+    }
+
+    if schema_version == 0 {
+        let migrated = migrate_settings_v0_to_v1(val)?;
+        validate_settings(&migrated)?;
+        atomic_write_settings(path, &migrated)?;
+        return Ok(migrated);
+    }
+
+    match serde_json::from_value::<AppSettings>(val) {
+        Ok(settings) => {
+            if let Err(e) = validate_settings(&settings) {
+                let backup_path = preserve_invalid_settings_file(path, "invalid");
+                return Err(ApiError {
+                    code: ErrorCode::InvalidArgument,
+                    message: format!(
+                        "Invalid settings values (original preserved at '{}'): {}",
+                        backup_path.display(),
+                        e.message
+                    ),
+                    details: None,
+                    retryable: false,
+                });
+            }
+            Ok(settings)
+        }
+        Err(e) => {
+            let backup_path = preserve_invalid_settings_file(path, "invalid");
+            Err(ApiError {
+                code: ErrorCode::InvalidArgument,
+                message: format!(
+                    "Failed to parse settings schema v1 (original preserved at '{}'): {}",
+                    backup_path.display(),
+                    e
+                ),
+                details: None,
+                retryable: false,
+            })
+        }
+    }
+}
+
 pub fn validate_settings(settings: &AppSettings) -> Result<(), ApiError> {
     if settings.schema_version != 1 {
         return Err(ApiError {
@@ -1492,7 +1687,10 @@ pub fn atomic_write_settings(path: &Path, settings: &AppSettings) -> Result<(), 
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| ApiError {
-            code: ErrorCode::StorageFailure,
+            code: match e.kind() {
+                std::io::ErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
+                _ => ErrorCode::StorageFailure,
+            },
             message: format!("Failed to create settings directory: {}", e),
             details: None,
             retryable: false,
@@ -1501,7 +1699,10 @@ pub fn atomic_write_settings(path: &Path, settings: &AppSettings) -> Result<(), 
 
     let tmp_path = path.with_extension(format!("json.tmp.{}", uuid::Uuid::new_v4()));
     std::fs::write(&tmp_path, json_str.as_bytes()).map_err(|e| ApiError {
-        code: ErrorCode::StorageFailure,
+        code: match e.kind() {
+            std::io::ErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
+            _ => ErrorCode::StorageFailure,
+        },
         message: format!("Failed to write temporary settings file: {}", e),
         details: None,
         retryable: false,
@@ -1542,21 +1743,15 @@ pub fn atomic_write_settings(path: &Path, settings: &AppSettings) -> Result<(), 
     Ok(())
 }
 
-pub fn load_settings_impl(state: &AppState) -> AppSettings {
-    if state.settings_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&state.settings_path) {
-            if let Ok(loaded) = serde_json::from_str::<AppSettings>(&content) {
-                let mut s = state.settings.lock().unwrap();
-                *s = loaded.clone();
-                return loaded;
-            }
-        }
-    }
-    state.settings.lock().unwrap().clone()
+pub fn load_settings_impl(state: &AppState) -> Result<AppSettings, ApiError> {
+    let loaded = load_or_migrate_settings(&state.settings_path)?;
+    let mut s = state.settings.lock().unwrap();
+    *s = loaded.clone();
+    Ok(loaded)
 }
 
 #[tauri::command]
-pub fn load_settings(state: tauri::State<'_, AppState>) -> AppSettings {
+pub fn load_settings(state: tauri::State<'_, AppState>) -> Result<AppSettings, ApiError> {
     load_settings_impl(&state)
 }
 
@@ -1578,19 +1773,31 @@ pub fn save_settings_impl(
     new_settings: AppSettings,
 ) -> Result<AppSettings, ApiError> {
     validate_settings(&new_settings)?;
-    atomic_write_settings(&state.settings_path, &new_settings)?;
 
-    // Propagate models directory change to the shared runtime path and orchestrator.
+    // Validate and create models directory if specified
     if let Some(ref dir) = new_settings.models_directory {
         let new_path = expand_home_dir(dir);
         if !new_path.as_os_str().is_empty() {
-            // Best-effort mkdir; ignore errors (validate_settings already checked for nulls).
-            let _ = std::fs::create_dir_all(&new_path);
+            std::fs::create_dir_all(&new_path).map_err(|e| ApiError {
+                code: match e.kind() {
+                    std::io::ErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
+                    _ => ErrorCode::StorageFailure,
+                },
+                message: format!(
+                    "Failed to create models directory '{}': {}",
+                    new_path.display(),
+                    e
+                ),
+                details: None,
+                retryable: false,
+            })?;
             let mut root = state.models_root.lock().unwrap();
             *root = new_path.clone();
             state.orchestrator.set_models_root(&new_path);
         }
     }
+
+    atomic_write_settings(&state.settings_path, &new_settings)?;
 
     let mut s = state.settings.lock().unwrap();
     *s = new_settings.clone();
