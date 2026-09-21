@@ -221,13 +221,6 @@ export async function getJobsHistory(limit = 50): Promise<JobHistoryPage> {
   return { jobs: [], nextCursor: null };
 }
 
-export async function processNextJob(): Promise<JobSnapshot | null> {
-  if (isTauri()) {
-    return await invoke<JobSnapshot | null>("process_next_job");
-  }
-  return null;
-}
-
 export async function cancelJob(jobId: string): Promise<JobSnapshot | null> {
   if (isTauri()) {
     return await invoke<JobSnapshot>("cancel_job", { jobId });

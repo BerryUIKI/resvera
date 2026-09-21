@@ -387,6 +387,27 @@ pub fn uninstall_model_impl(state: &AppState, model_id: String) -> Result<bool, 
         });
     }
 
+    let active_count = state
+        .orchestrator
+        .db
+        .count_active_jobs_for_model(&model_id)
+        .map_err(|e| ApiError {
+            code: ErrorCode::StorageFailure,
+            message: e.to_string(),
+            details: None,
+            retryable: false,
+        })?;
+    if active_count > 0 {
+        return Err(ApiError {
+            code: ErrorCode::ModelInUse,
+            message: format!(
+                "Cannot uninstall model '{model_id}': referenced by {active_count} active or queued job(s)"
+            ),
+            details: None,
+            retryable: false,
+        });
+    }
+
     let root = state.models_root.lock().unwrap().clone();
     let installer = ModelInstaller::new(&root);
     installer.uninstall_model(&model_id).map_err(|e| match &e {
@@ -857,13 +878,6 @@ pub fn process_next_job_impl(state: &AppState) -> Result<Option<JobSnapshot>, Ap
     Ok(res.map(job_record_to_snapshot))
 }
 
-#[tauri::command]
-pub fn process_next_job(
-    state: tauri::State<'_, AppState>,
-) -> Result<Option<JobSnapshot>, ApiError> {
-    process_next_job_impl(&state)
-}
-
 pub fn cancel_job_impl(state: &AppState, job_id: &str) -> Result<JobSnapshot, ApiError> {
     state
         .orchestrator
@@ -1139,6 +1153,19 @@ pub fn load_settings(state: tauri::State<'_, AppState>) -> AppSettings {
     load_settings_impl(&state)
 }
 
+pub fn expand_home_dir(path_str: &str) -> PathBuf {
+    if let Some(stripped) = path_str.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+            return PathBuf::from(home).join(stripped);
+        }
+    } else if path_str == "~" {
+        if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+            return PathBuf::from(home);
+        }
+    }
+    PathBuf::from(path_str)
+}
+
 pub fn save_settings_impl(
     state: &AppState,
     new_settings: AppSettings,
@@ -1146,14 +1173,15 @@ pub fn save_settings_impl(
     validate_settings(&new_settings)?;
     atomic_write_settings(&state.settings_path, &new_settings)?;
 
-    // Propagate models directory change to the shared runtime path.
+    // Propagate models directory change to the shared runtime path and orchestrator.
     if let Some(ref dir) = new_settings.models_directory {
-        let new_path = PathBuf::from(dir);
+        let new_path = expand_home_dir(dir);
         if !new_path.as_os_str().is_empty() {
             // Best-effort mkdir; ignore errors (validate_settings already checked for nulls).
             let _ = std::fs::create_dir_all(&new_path);
             let mut root = state.models_root.lock().unwrap();
-            *root = new_path;
+            *root = new_path.clone();
+            state.orchestrator.set_models_root(&new_path);
         }
     }
 

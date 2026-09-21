@@ -89,7 +89,6 @@ fn main() {
             uninstall_model,
             create_upscale_job,
             create_batch_jobs,
-            process_next_job,
             cancel_job,
             pause_queue,
             resume_queue,

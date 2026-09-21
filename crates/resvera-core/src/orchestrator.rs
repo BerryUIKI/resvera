@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -78,7 +78,7 @@ pub struct JobOrchestrator {
     pub db: AppDatabase,
     pub engine: Arc<dyn InferenceEngine>,
     pub preview_cache_dir: PathBuf,
-    pub models_root: PathBuf,
+    models_root: Arc<RwLock<PathBuf>>,
     paused: Arc<AtomicBool>,
     active_job_id: Arc<Mutex<Option<String>>>,
     active_cancel_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
@@ -107,7 +107,7 @@ impl JobOrchestrator {
             db,
             engine,
             preview_cache_dir,
-            models_root: models_root.as_ref().to_path_buf(),
+            models_root: Arc::new(RwLock::new(models_root.as_ref().to_path_buf())),
             paused: Arc::new(AtomicBool::new(false)),
             active_job_id: Arc::new(Mutex::new(None)),
             active_cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
@@ -126,8 +126,13 @@ impl JobOrchestrator {
         self.paused.load(Ordering::SeqCst)
     }
 
-    pub fn set_models_root<P: AsRef<Path>>(&mut self, path: P) {
-        self.models_root = path.as_ref().to_path_buf();
+    pub fn set_models_root<P: AsRef<Path>>(&self, path: P) {
+        let mut root = self.models_root.write().unwrap();
+        *root = path.as_ref().to_path_buf();
+    }
+
+    pub fn models_root(&self) -> PathBuf {
+        self.models_root.read().unwrap().clone()
     }
 
     pub fn submit_job(&self, req: &UpscaleJobRequest) -> Result<JobRecord, OrchestratorError> {
@@ -238,8 +243,8 @@ impl JobOrchestrator {
         tile_size: Option<u32>,
         provider: &str,
     ) -> Result<ResolvedModel, OrchestratorError> {
-        let resolved =
-            ModelInstaller::new(&self.models_root).resolve_active_variant(model_id, variant_id)?;
+        let root = self.models_root();
+        let resolved = ModelInstaller::new(&root).resolve_active_variant(model_id, variant_id)?;
         let adapter = adapter_for_manifest(&resolved.manifest, resolved.variant.native_scale)?;
         adapter.validate_manifest(&resolved.manifest)?;
         validated_tile_size(tile_size, adapter.tile_constraints(&resolved.manifest))?;
@@ -351,7 +356,8 @@ impl JobOrchestrator {
         let src_alpha = loaded_input.alpha;
         let (width, height) = src_img.dimensions();
 
-        let installer = ModelInstaller::new(&self.models_root);
+        let root = self.models_root();
+        let installer = ModelInstaller::new(&root);
         let resolved = installer.resolve_version_variant(
             &job.model_id,
             &job.model_package_version,

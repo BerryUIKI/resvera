@@ -15,7 +15,6 @@ import {
   resumeQueue,
   getQueue,
   saveSettings,
-  processNextJob,
   installModel,
   uninstallModel,
   pickImages,
@@ -303,12 +302,6 @@ export const App: Component = () => {
         setIsPaused(false);
       } catch (err) {
         console.warn("Failed to resume queue:", err);
-      }
-    } else {
-      try {
-        await processNextJob();
-      } catch (err) {
-        console.warn("Failed to trigger processNextJob:", err);
       }
     }
     await syncQueueState();
