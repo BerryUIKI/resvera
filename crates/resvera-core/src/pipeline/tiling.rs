@@ -1,7 +1,30 @@
 use crate::adapter::PipelineError;
 use image::RgbImage;
+use serde::{Deserialize, Serialize};
 
 const MAX_BLEND_BUFFER_BYTES: usize = 512 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum BlendMode {
+    #[default]
+    Cosine,
+    Linear,
+}
+
+impl std::str::FromStr for BlendMode {
+    type Err = PipelineError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "cosine" => Ok(BlendMode::Cosine),
+            "linear" => Ok(BlendMode::Linear),
+            other => Err(PipelineError::Validation(format!(
+                "Unsupported blend mode: '{other}'. Expected 'cosine' or 'linear'."
+            ))),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TileRect {
@@ -74,6 +97,7 @@ pub struct TileBlender {
     out_width: u32,
     out_height: u32,
     scale: u32,
+    blend_mode: BlendMode,
     accum_r: Vec<f32>,
     accum_g: Vec<f32>,
     accum_b: Vec<f32>,
@@ -84,11 +108,20 @@ impl TileBlender {
     /// Compatibility constructor for callers that cannot yet propagate allocation failures.
     /// New production code should use [`Self::try_new`].
     pub fn new(img_width: u32, img_height: u32, scale: u32) -> Self {
-        Self::try_new(img_width, img_height, scale)
+        Self::try_new_with_blend_mode(img_width, img_height, scale, BlendMode::Cosine)
             .expect("blend buffer dimensions must fit within the configured safety limit")
     }
 
     pub fn try_new(img_width: u32, img_height: u32, scale: u32) -> Result<Self, PipelineError> {
+        Self::try_new_with_blend_mode(img_width, img_height, scale, BlendMode::Cosine)
+    }
+
+    pub fn try_new_with_blend_mode(
+        img_width: u32,
+        img_height: u32,
+        scale: u32,
+        blend_mode: BlendMode,
+    ) -> Result<Self, PipelineError> {
         let out_width = img_width
             .checked_mul(scale)
             .ok_or_else(|| PipelineError::Validation("Upscaled output width overflowed".into()))?;
@@ -122,6 +155,7 @@ impl TileBlender {
             out_width,
             out_height,
             scale,
+            blend_mode,
             accum_r: make_buffer()?,
             accum_g: make_buffer()?,
             accum_b: make_buffer()?,
@@ -145,10 +179,14 @@ impl TileBlender {
             // Calculate vertical feather weight
             let mut wy = 1.0f32;
             if out_y > 0 && ((ty as f32) < feather) {
-                wy = wy.min(ty as f32 / feather);
+                wy = wy.min(calc_feather(ty as f32, feather, self.blend_mode));
             }
             if out_y + tile_h < self.out_height && (((tile_h - 1 - ty) as f32) < feather) {
-                wy = wy.min((tile_h - 1 - ty) as f32 / feather);
+                wy = wy.min(calc_feather(
+                    (tile_h - 1 - ty) as f32,
+                    feather,
+                    self.blend_mode,
+                ));
             }
 
             for tx in 0..tile_w {
@@ -160,10 +198,14 @@ impl TileBlender {
                 // Calculate horizontal feather weight
                 let mut wx = 1.0f32;
                 if out_x > 0 && ((tx as f32) < feather) {
-                    wx = wx.min(tx as f32 / feather);
+                    wx = wx.min(calc_feather(tx as f32, feather, self.blend_mode));
                 }
                 if out_x + tile_w < self.out_width && (((tile_w - 1 - tx) as f32) < feather) {
-                    wx = wx.min((tile_w - 1 - tx) as f32 / feather);
+                    wx = wx.min(calc_feather(
+                        (tile_w - 1 - tx) as f32,
+                        feather,
+                        self.blend_mode,
+                    ));
                 }
 
                 let w = (wx * wy).max(1e-4);
@@ -196,5 +238,17 @@ impl TileBlender {
         }
 
         img
+    }
+}
+
+fn calc_feather(dist: f32, feather: f32, mode: BlendMode) -> f32 {
+    if dist >= feather || feather <= 0.0 {
+        1.0
+    } else {
+        let t = (dist / feather).clamp(0.0, 1.0);
+        match mode {
+            BlendMode::Linear => t,
+            BlendMode::Cosine => 0.5 * (1.0 - (std::f32::consts::PI * t).cos()),
+        }
     }
 }

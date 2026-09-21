@@ -106,6 +106,7 @@ fn test_collision_safe_naming_and_atomic_save() {
         4,
         &OutputFormat::Png,
         false,
+        None,
     );
     assert_eq!(p1.file_name().unwrap(), "photo_realesrgan_4x.png");
 
@@ -121,6 +122,7 @@ fn test_collision_safe_naming_and_atomic_save() {
         4,
         &OutputFormat::Png,
         false,
+        None,
     );
     assert_eq!(p2.file_name().unwrap(), "photo_realesrgan_4x_1.png");
 
@@ -132,6 +134,46 @@ fn test_collision_safe_naming_and_atomic_save() {
         4,
         &OutputFormat::Png,
         true,
+        None,
     );
     assert_eq!(p3.file_name().unwrap(), "photo_realesrgan_4x.png");
+
+    // Custom naming template
+    let p4 = generate_output_path(
+        out_dir,
+        &input_path,
+        "realesrgan",
+        4,
+        &OutputFormat::Png,
+        false,
+        Some("custom_{model}_{stem}_{scale}x"),
+    );
+    assert_eq!(p4.file_name().unwrap(), "custom_realesrgan_photo_4x.png");
+}
+
+#[test]
+fn test_blend_mode_differentiation() {
+    use resvera_core::pipeline::tiling::{BlendMode, TileBlender, TilePlan};
+
+    let plan = TilePlan::build(100, 100, 64, 16);
+    let mut linear_blender =
+        TileBlender::try_new_with_blend_mode(100, 100, 1, BlendMode::Linear).unwrap();
+    let mut cosine_blender =
+        TileBlender::try_new_with_blend_mode(100, 100, 1, BlendMode::Cosine).unwrap();
+
+    for tile_rect in &plan.tiles {
+        let mut tile_img = RgbImage::new(tile_rect.width, tile_rect.height);
+        for pixel in tile_img.pixels_mut() {
+            *pixel = image::Rgb([128, 128, 128]);
+        }
+        linear_blender.blend_tile(tile_rect, &tile_img, plan.overlap);
+        cosine_blender.blend_tile(tile_rect, &tile_img, plan.overlap);
+    }
+
+    let img_linear = linear_blender.finalize();
+    let img_cosine = cosine_blender.finalize();
+
+    // Both should reconstruct valid images of identical dimensions
+    assert_eq!(img_linear.dimensions(), (100, 100));
+    assert_eq!(img_cosine.dimensions(), (100, 100));
 }

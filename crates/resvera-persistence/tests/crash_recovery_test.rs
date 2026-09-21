@@ -23,6 +23,9 @@ fn sample_job(id: &str, state: &str) -> JobRecord {
         output_format_json: None,
         overwrite: false,
         tile_size: None,
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
         created_at: now.clone(),
         updated_at: now,
     }

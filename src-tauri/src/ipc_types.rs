@@ -60,6 +60,7 @@ pub struct EngineInfo {
     pub display_name: String,
     pub version: String,
     pub healthy: bool,
+    pub supports_fp16: bool,
     pub diagnostic: Option<String>,
 }
 
@@ -123,6 +124,10 @@ pub struct JobSnapshot {
     pub target_scale: u32,
     pub engine_id: String,
     pub provider_id: Option<String>,
+    pub tile_size: Option<u32>,
+    pub tile_overlap: Option<u32>,
+    pub blend_mode: Option<String>,
+    pub naming_template: Option<String>,
     pub progress: Option<JobProgress>,
     pub error: Option<ApiError>,
     pub created_at: String,

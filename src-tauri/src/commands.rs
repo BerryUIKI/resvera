@@ -169,6 +169,10 @@ pub fn job_record_to_snapshot(record: JobRecord) -> JobSnapshot {
         target_scale: record.target_scale,
         engine_id: record.engine_id,
         provider_id: record.provider_id,
+        tile_size: record.tile_size,
+        tile_overlap: record.tile_overlap,
+        blend_mode: record.blend_mode,
+        naming_template: record.naming_template,
         progress: Some(JobProgress {
             fraction: record.progress_fraction,
             stage: record.progress_stage,
@@ -224,6 +228,7 @@ pub fn get_runtime_status_impl(state: &AppState) -> Result<RuntimeStatus, ApiErr
             display_name: "ONNX Runtime".to_string(),
             version: "1.29.0".to_string(),
             healthy: health.healthy,
+            supports_fp16: caps.supports_fp16,
             diagnostic: health.diagnostic_message,
         },
         providers,
@@ -836,6 +841,29 @@ pub fn create_upscale_job_impl(
     state: &AppState,
     mut req: CoreJobRequest,
 ) -> Result<JobSnapshot, ApiError> {
+    let settings = load_settings_impl(state);
+    if req.provider_preference.is_none() {
+        if let ProviderPreference::Specific { provider_id } = &settings.provider_preference {
+            req.provider_preference = Some(provider_id.clone());
+        }
+    }
+    if req.tile_size.is_none() {
+        req.tile_size = settings.tile_size_override;
+    }
+    if req.tile_overlap.is_none() {
+        req.tile_overlap = settings.tile_overlap;
+    }
+    if req.blend_mode.is_none() {
+        req.blend_mode = settings.blend_mode.clone();
+    }
+    if req
+        .naming_template
+        .as_deref()
+        .is_none_or(|s| s.trim().is_empty())
+    {
+        req.naming_template = Some(settings.naming_template.clone());
+    }
+
     let verified_input = validate_path(&req.input_path)?;
     req.input_path = verified_input.to_string_lossy().to_string();
 
@@ -863,6 +891,30 @@ pub fn create_batch_jobs_impl(
     state: &AppState,
     mut req: CoreBatchRequest,
 ) -> Result<Vec<JobSnapshot>, ApiError> {
+    let settings = load_settings_impl(state);
+    if req.defaults.provider_preference.is_none() {
+        if let ProviderPreference::Specific { provider_id } = &settings.provider_preference {
+            req.defaults.provider_preference = Some(provider_id.clone());
+        }
+    }
+    if req.defaults.tile_size.is_none() {
+        req.defaults.tile_size = settings.tile_size_override;
+    }
+    if req.defaults.tile_overlap.is_none() {
+        req.defaults.tile_overlap = settings.tile_overlap;
+    }
+    if req.defaults.blend_mode.is_none() {
+        req.defaults.blend_mode = settings.blend_mode.clone();
+    }
+    if req
+        .defaults
+        .naming_template
+        .as_deref()
+        .is_none_or(|s| s.trim().is_empty())
+    {
+        req.defaults.naming_template = Some(settings.naming_template.clone());
+    }
+
     for input in req.inputs.iter_mut() {
         let verified = validate_path(input)?;
         *input = verified.to_string_lossy().to_string();

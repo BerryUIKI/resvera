@@ -106,13 +106,26 @@ fn test_ipc_commands_workflow() {
         output_format: OutputFormat::Png,
         overwrite: false,
         tile_size: Some(32),
+        tile_overlap: Some(16),
+        blend_mode: Some("cosine".to_string()),
+        naming_template: Some("{stem}_4x_custom".to_string()),
         provider_preference: Some("cpu".to_string()),
     };
 
     let snapshot = create_upscale_job_impl(&state, req).unwrap();
     assert_eq!(snapshot.state, "queued");
+    assert_eq!(snapshot.tile_size, Some(32));
+    assert_eq!(snapshot.tile_overlap, Some(16));
+    assert_eq!(snapshot.blend_mode.as_deref(), Some("cosine"));
+    assert_eq!(
+        snapshot.naming_template.as_deref(),
+        Some("{stem}_4x_custom")
+    );
 
     let fetched = get_job_impl(&state, &snapshot.id).unwrap();
+    assert_eq!(fetched.tile_overlap, Some(16));
+    assert_eq!(fetched.blend_mode.as_deref(), Some("cosine"));
+    assert_eq!(fetched.naming_template.as_deref(), Some("{stem}_4x_custom"));
     assert_eq!(fetched.id, snapshot.id);
     assert_eq!(fetched.state, "queued");
 
@@ -273,6 +286,9 @@ fn test_background_queue_worker_execution() {
         output_format: OutputFormat::Png,
         overwrite: false,
         tile_size: Some(32),
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
         provider_preference: Some("cpu".to_string()),
     };
 
@@ -306,6 +322,9 @@ fn test_background_queue_worker_execution() {
         output_format: OutputFormat::Png,
         overwrite: true,
         tile_size: Some(32),
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
         provider_preference: Some("cpu".to_string()),
     };
     let job2 = create_upscale_job_impl(&state, req2).unwrap();
@@ -477,6 +496,9 @@ fn test_uninstall_model_success_and_validation() {
         output_format_json: None,
         overwrite: false,
         tile_size: None,
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
         created_at: "2026-09-20T00:00:00Z".into(),
         updated_at: "2026-09-20T00:00:00Z".into(),
     };
@@ -704,12 +726,19 @@ fn test_retry_job_ipc_workflow_and_active_state_rejection() {
         output_format: OutputFormat::Png,
         overwrite: false,
         tile_size: Some(128),
+        tile_overlap: Some(24),
+        blend_mode: Some("linear".to_string()),
+        naming_template: Some("{stem}_retry_test".to_string()),
         provider_preference: Some("cpu".to_string()),
     };
 
     // 1. Submit initial job
     let snap1 = create_upscale_job_impl(&state, req.clone()).unwrap();
     assert_eq!(snap1.state, "queued");
+    assert_eq!(snap1.tile_size, Some(128));
+    assert_eq!(snap1.tile_overlap, Some(24));
+    assert_eq!(snap1.blend_mode.as_deref(), Some("linear"));
+    assert_eq!(snap1.naming_template.as_deref(), Some("{stem}_retry_test"));
 
     // 2. Cannot submit duplicate active job for same input
     let dup_err = create_upscale_job_impl(&state, req.clone()).unwrap_err();
@@ -730,6 +759,13 @@ fn test_retry_job_ipc_workflow_and_active_state_rejection() {
     assert_eq!(retried.model_id, "realesrgan-x4plus");
     assert_eq!(retried.target_scale, 4);
     assert_eq!(retried.input_path, snap1.input_path);
+    assert_eq!(retried.tile_size, Some(128));
+    assert_eq!(retried.tile_overlap, Some(24));
+    assert_eq!(retried.blend_mode.as_deref(), Some("linear"));
+    assert_eq!(
+        retried.naming_template.as_deref(),
+        Some("{stem}_retry_test")
+    );
 
     // 6. Cancel the retried job
     let cancelled = cancel_job_impl(&state, &retried.id).unwrap();

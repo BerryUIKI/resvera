@@ -46,6 +46,7 @@ export interface EngineInfo {
   displayName: string;
   version: string;
   healthy: boolean;
+  supportsFp16: boolean;
   diagnostic: string | null;
 }
 
@@ -105,6 +106,9 @@ export interface UpscaleJobRequest {
   outputFormat: OutputFormat;
   overwrite: boolean;
   tileSize: number | null;
+  tileOverlap?: number | null;
+  blendMode?: string | null;
+  namingTemplate?: string | null;
   providerPreference: string | null;
 }
 
@@ -120,6 +124,10 @@ export interface JobSnapshot {
   targetScale: number;
   engineId: string;
   providerId: string | null;
+  tileSize?: number | null;
+  tileOverlap?: number | null;
+  blendMode?: string | null;
+  namingTemplate?: string | null;
   progress: JobProgress | null;
   error: ApiError | null;
   createdAt: string;

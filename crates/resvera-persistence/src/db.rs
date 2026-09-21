@@ -35,6 +35,9 @@ pub struct JobRecord {
     pub output_format_json: Option<String>,
     pub overwrite: bool,
     pub tile_size: Option<u32>,
+    pub tile_overlap: Option<u32>,
+    pub blend_mode: Option<String>,
+    pub naming_template: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -93,6 +96,9 @@ impl AppDatabase {
                 output_format_json TEXT,
                 overwrite INTEGER NOT NULL DEFAULT 0,
                 tile_size INTEGER,
+                tile_overlap INTEGER,
+                blend_mode TEXT,
+                naming_template TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -119,8 +125,9 @@ impl AppDatabase {
                 model_id, model_package_version, model_variant_id, target_scale,
                 engine_id, provider_id, progress_fraction, progress_stage,
                 error_code, error_message, output_directory, output_format_json,
-                overwrite, tile_size, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+                overwrite, tile_size, tile_overlap, blend_mode, naming_template,
+                created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
             params![
                 job.id,
                 job.state,
@@ -141,6 +148,9 @@ impl AppDatabase {
                 job.output_format_json,
                 if job.overwrite { 1 } else { 0 },
                 job.tile_size,
+                job.tile_overlap,
+                job.blend_mode,
+                job.naming_template,
                 job.created_at,
                 job.updated_at
             ],
@@ -158,8 +168,9 @@ impl AppDatabase {
                     model_id, model_package_version, model_variant_id, target_scale,
                     engine_id, provider_id, progress_fraction, progress_stage,
                     error_code, error_message, output_directory, output_format_json,
-                    overwrite, tile_size, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+                    overwrite, tile_size, tile_overlap, blend_mode, naming_template,
+                    created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
             )?;
             for job in jobs {
                 stmt.execute(params![
@@ -182,6 +193,9 @@ impl AppDatabase {
                     job.output_format_json,
                     if job.overwrite { 1 } else { 0 },
                     job.tile_size,
+                    job.tile_overlap,
+                    job.blend_mode,
+                    job.naming_template,
                     job.created_at,
                     job.updated_at
                 ])?;
@@ -286,40 +300,11 @@ impl AppDatabase {
 
     pub fn get_job(&self, id: &str) -> Result<Option<JobRecord>, DatabaseError> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, state, input_path, output_path, preview_path,
-                    model_id, model_package_version, model_variant_id, target_scale,
-                    engine_id, provider_id, progress_fraction, progress_stage,
-                    error_code, error_message, output_directory, output_format_json,
-                    overwrite, tile_size, created_at, updated_at
-             FROM jobs WHERE id = ?1",
-        )?;
+        let query = format!("SELECT {JOB_COLUMNS} FROM jobs WHERE id = ?1");
+        let mut stmt = conn.prepare(&query)?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
-            let overwrite_int: i64 = row.get(17)?;
-            Ok(Some(JobRecord {
-                id: row.get(0)?,
-                state: row.get(1)?,
-                input_path: row.get(2)?,
-                output_path: row.get(3)?,
-                preview_path: row.get(4)?,
-                model_id: row.get(5)?,
-                model_package_version: row.get(6)?,
-                model_variant_id: row.get(7)?,
-                target_scale: row.get(8)?,
-                engine_id: row.get(9)?,
-                provider_id: row.get(10)?,
-                progress_fraction: row.get(11)?,
-                progress_stage: row.get(12)?,
-                error_code: row.get(13)?,
-                error_message: row.get(14)?,
-                output_directory: row.get(15)?,
-                output_format_json: row.get(16)?,
-                overwrite: overwrite_int != 0,
-                tile_size: row.get(18)?,
-                created_at: row.get(19)?,
-                updated_at: row.get(20)?,
-            }))
+            Ok(Some(row_to_job(row)?))
         } else {
             Ok(None)
         }
@@ -327,40 +312,13 @@ impl AppDatabase {
 
     pub fn get_job_by_state(&self, state: &str) -> Result<Option<JobRecord>, DatabaseError> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, state, input_path, output_path, preview_path,
-                    model_id, model_package_version, model_variant_id, target_scale,
-                    engine_id, provider_id, progress_fraction, progress_stage,
-                    error_code, error_message, output_directory, output_format_json,
-                    overwrite, tile_size, created_at, updated_at
-             FROM jobs WHERE state = ?1 ORDER BY created_at ASC LIMIT 1",
-        )?;
+        let query = format!(
+            "SELECT {JOB_COLUMNS} FROM jobs WHERE state = ?1 ORDER BY created_at ASC LIMIT 1"
+        );
+        let mut stmt = conn.prepare(&query)?;
         let mut rows = stmt.query(params![state])?;
         if let Some(row) = rows.next()? {
-            let overwrite_int: i64 = row.get(17)?;
-            Ok(Some(JobRecord {
-                id: row.get(0)?,
-                state: row.get(1)?,
-                input_path: row.get(2)?,
-                output_path: row.get(3)?,
-                preview_path: row.get(4)?,
-                model_id: row.get(5)?,
-                model_package_version: row.get(6)?,
-                model_variant_id: row.get(7)?,
-                target_scale: row.get(8)?,
-                engine_id: row.get(9)?,
-                provider_id: row.get(10)?,
-                progress_fraction: row.get(11)?,
-                progress_stage: row.get(12)?,
-                error_code: row.get(13)?,
-                error_message: row.get(14)?,
-                output_directory: row.get(15)?,
-                output_format_json: row.get(16)?,
-                overwrite: overwrite_int != 0,
-                tile_size: row.get(18)?,
-                created_at: row.get(19)?,
-                updated_at: row.get(20)?,
-            }))
+            Ok(Some(row_to_job(row)?))
         } else {
             Ok(None)
         }
@@ -462,40 +420,9 @@ impl AppDatabase {
     /// Lists recent jobs up to the specified limit, ordered by creation time descending.
     pub fn list_recent_jobs(&self, limit: usize) -> Result<Vec<JobRecord>, DatabaseError> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, state, input_path, output_path, preview_path,
-                    model_id, model_package_version, model_variant_id, target_scale,
-                    engine_id, provider_id, progress_fraction, progress_stage,
-                    error_code, error_message, output_directory, output_format_json,
-                    overwrite, tile_size, created_at, updated_at
-             FROM jobs ORDER BY created_at DESC LIMIT ?1",
-        )?;
-        let rows = stmt.query_map(params![limit as i64], |row| {
-            let overwrite_int: i64 = row.get(17)?;
-            Ok(JobRecord {
-                id: row.get(0)?,
-                state: row.get(1)?,
-                input_path: row.get(2)?,
-                output_path: row.get(3)?,
-                preview_path: row.get(4)?,
-                model_id: row.get(5)?,
-                model_package_version: row.get(6)?,
-                model_variant_id: row.get(7)?,
-                target_scale: row.get(8)?,
-                engine_id: row.get(9)?,
-                provider_id: row.get(10)?,
-                progress_fraction: row.get(11)?,
-                progress_stage: row.get(12)?,
-                error_code: row.get(13)?,
-                error_message: row.get(14)?,
-                output_directory: row.get(15)?,
-                output_format_json: row.get(16)?,
-                overwrite: overwrite_int != 0,
-                tile_size: row.get(18)?,
-                created_at: row.get(19)?,
-                updated_at: row.get(20)?,
-            })
-        })?;
+        let query = format!("SELECT {JOB_COLUMNS} FROM jobs ORDER BY created_at DESC LIMIT ?1");
+        let mut stmt = conn.prepare(&query)?;
+        let rows = stmt.query_map(params![limit as i64], row_to_job)?;
 
         let mut jobs = Vec::new();
         for job_res in rows {
@@ -503,6 +430,43 @@ impl AppDatabase {
         }
         Ok(jobs)
     }
+}
+
+const JOB_COLUMNS: &str = "id, state, input_path, output_path, preview_path, \
+    model_id, model_package_version, model_variant_id, target_scale, \
+    engine_id, provider_id, progress_fraction, progress_stage, \
+    error_code, error_message, output_directory, output_format_json, \
+    overwrite, tile_size, tile_overlap, blend_mode, naming_template, \
+    created_at, updated_at";
+
+fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobRecord> {
+    let overwrite_int: i64 = row.get(17)?;
+    Ok(JobRecord {
+        id: row.get(0)?,
+        state: row.get(1)?,
+        input_path: row.get(2)?,
+        output_path: row.get(3)?,
+        preview_path: row.get(4)?,
+        model_id: row.get(5)?,
+        model_package_version: row.get(6)?,
+        model_variant_id: row.get(7)?,
+        target_scale: row.get(8)?,
+        engine_id: row.get(9)?,
+        provider_id: row.get(10)?,
+        progress_fraction: row.get(11)?,
+        progress_stage: row.get(12)?,
+        error_code: row.get(13)?,
+        error_message: row.get(14)?,
+        output_directory: row.get(15)?,
+        output_format_json: row.get(16)?,
+        overwrite: overwrite_int != 0,
+        tile_size: row.get(18)?,
+        tile_overlap: row.get(19)?,
+        blend_mode: row.get(20)?,
+        naming_template: row.get(21)?,
+        created_at: row.get(22)?,
+        updated_at: row.get(23)?,
+    })
 }
 
 fn migrate_job_columns(conn: &Connection) -> Result<(), DatabaseError> {
@@ -517,6 +481,9 @@ fn migrate_job_columns(conn: &Connection) -> Result<(), DatabaseError> {
         ("output_format_json", "output_format_json TEXT"),
         ("overwrite", "overwrite INTEGER NOT NULL DEFAULT 0"),
         ("tile_size", "tile_size INTEGER"),
+        ("tile_overlap", "tile_overlap INTEGER"),
+        ("blend_mode", "blend_mode TEXT"),
+        ("naming_template", "naming_template TEXT"),
     ] {
         if !columns.contains(name) {
             conn.execute_batch(&format!("ALTER TABLE jobs ADD COLUMN {definition}"))?;
@@ -553,6 +520,9 @@ mod tests {
             output_format_json: None,
             overwrite: false,
             tile_size: None,
+            tile_overlap: None,
+            blend_mode: None,
+            naming_template: None,
             created_at: now.clone(),
             updated_at: now,
         }

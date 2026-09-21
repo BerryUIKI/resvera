@@ -1,10 +1,11 @@
 import { Component, Show, createSignal, createEffect } from "solid-js";
-import { AppSettings, MetadataPolicy, ThemePreference } from "../types/ipc";
+import { AppSettings, MetadataPolicy, RuntimeStatus, ThemePreference } from "../types/ipc";
 import { Locale, useI18n } from "../i18n";
 
 interface SettingsModalProps {
   isOpen: boolean;
   settings: AppSettings;
+  runtimeStatus?: RuntimeStatus | null;
   onClose: () => void;
   onSave: (settings: AppSettings) => Promise<void>;
 }
@@ -293,9 +294,24 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                     class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                   >
                     <option value="automatic">{t("controls.providerOptions.auto")}</option>
-                    <option value="directml">{t("controls.providerOptions.directml")}</option>
-                    <option value="coreml">{t("controls.providerOptions.coreml")}</option>
-                    <option value="cuda">{t("controls.providerOptions.cuda")}</option>
+                    <option
+                      value="directml"
+                      disabled={!(props.runtimeStatus?.providers.map((p) => p.id) || ["cpu"]).includes("directml")}
+                    >
+                      {t("controls.providerOptions.directml")}{!(props.runtimeStatus?.providers.map((p) => p.id) || ["cpu"]).includes("directml") ? " (Unavailable)" : ""}
+                    </option>
+                    <option
+                      value="coreml"
+                      disabled={!(props.runtimeStatus?.providers.map((p) => p.id) || ["cpu"]).includes("coreml")}
+                    >
+                      {t("controls.providerOptions.coreml")}{!(props.runtimeStatus?.providers.map((p) => p.id) || ["cpu"]).includes("coreml") ? " (Unavailable)" : ""}
+                    </option>
+                    <option
+                      value="cuda"
+                      disabled={!(props.runtimeStatus?.providers.map((p) => p.id) || ["cpu"]).includes("cuda")}
+                    >
+                      {t("controls.providerOptions.cuda")}{!(props.runtimeStatus?.providers.map((p) => p.id) || ["cpu"]).includes("cuda") ? " (Unavailable)" : ""}
+                    </option>
                     <option value="cpu">{t("controls.providerOptions.cpu")}</option>
                   </select>
                 </div>
@@ -314,7 +330,12 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                     >
                       <option value="fp32">{t("settings.fp32")}</option>
-                      <option value="fp16">{t("settings.fp16")}</option>
+                      <option
+                        value="fp16"
+                        disabled={!props.runtimeStatus?.engine.supportsFp16}
+                      >
+                        {t("settings.fp16")}{!props.runtimeStatus?.engine.supportsFp16 ? " (Unsupported)" : ""}
+                      </option>
                     </select>
                   </div>
 

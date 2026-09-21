@@ -40,6 +40,9 @@ fn test_alpha_channel_preservation_png_and_webp() {
         output_format: OutputFormat::Png,
         overwrite: true,
         tile_size: Some(32),
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
         provider_preference: Some("cpu".to_string()),
     };
 
@@ -68,6 +71,9 @@ fn test_alpha_channel_preservation_png_and_webp() {
         },
         overwrite: true,
         tile_size: Some(32),
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
         provider_preference: Some("cpu".to_string()),
     };
 
@@ -115,6 +121,9 @@ fn test_cancellation_during_finalization_cleans_up_files() {
         output_format: OutputFormat::Png,
         overwrite: true,
         tile_size: Some(32),
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
         provider_preference: Some("cpu".to_string()),
     };
 
