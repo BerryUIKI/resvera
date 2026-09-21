@@ -147,6 +147,9 @@ export interface JobHistoryPage {
   nextCursor: string | null;
 }
 
+export type MetadataPolicy = "preserveSafe" | "stripAll" | "preserveAll";
+export type ThemePreference = "system" | "light" | "dark";
+
 export interface AppSettings {
   schemaVersion: number;
   outputDirectory: string | null;
@@ -156,7 +159,7 @@ export interface AppSettings {
   defaultModelVariantId: string | null;
   defaultTargetScale: number;
   namingTemplate: string;
-  metadataPolicy: "strip" | "preserveSafe";
+  metadataPolicy: MetadataPolicy;
   preserveGps: boolean;
   providerPreference: ProviderPreference;
   tileSizeOverride: number | null;
@@ -166,6 +169,6 @@ export interface AppSettings {
   gpuDeviceId: number | null;
   overwriteExisting: boolean;
   locale: string;
-  theme: "system" | "light" | "dark";
+  theme: ThemePreference;
   checkForUpdates: boolean;
 }

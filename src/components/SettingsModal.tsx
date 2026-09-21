@@ -1,28 +1,40 @@
 import { Component, Show, createSignal, createEffect } from "solid-js";
-import { AppSettings } from "../types/ipc";
+import { AppSettings, MetadataPolicy, ThemePreference } from "../types/ipc";
 import { Locale, useI18n } from "../i18n";
 
 interface SettingsModalProps {
   isOpen: boolean;
   settings: AppSettings;
   onClose: () => void;
-  onSave: (settings: AppSettings) => void;
+  onSave: (settings: AppSettings) => Promise<void>;
 }
 
 export const SettingsModal: Component<SettingsModalProps> = (props) => {
   const { t, locale } = useI18n();
   const [activeTab, setActiveTab] = createSignal<"general" | "storage" | "engine">("general");
   const [draft, setDraft] = createSignal<AppSettings>(props.settings);
+  const [isSaving, setIsSaving] = createSignal(false);
+  const [saveError, setSaveError] = createSignal<string | null>(null);
 
   createEffect(() => {
     if (props.isOpen) {
       setDraft({ ...props.settings });
+      setSaveError(null);
+      setIsSaving(false);
     }
   });
 
-  const handleSave = () => {
-    props.onSave(draft());
-    props.onClose();
+  const handleSave = async () => {
+    setSaveError(null);
+    setIsSaving(true);
+    try {
+      await props.onSave(draft());
+      props.onClose();
+    } catch (err: any) {
+      setSaveError(err?.message || String(err));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -106,7 +118,7 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                   onChange={(e) =>
                     setDraft((prev) => ({
                       ...prev,
-                      theme: e.currentTarget.value as "dark" | "light" | "system",
+                      theme: e.currentTarget.value as ThemePreference,
                     }))
                   }
                   class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
@@ -141,13 +153,14 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
                   onChange={(e) =>
                     setDraft((prev) => ({
                       ...prev,
-                      metadataPolicy: e.currentTarget.value as "strip" | "preserveSafe",
+                      metadataPolicy: e.currentTarget.value as MetadataPolicy,
                     }))
                   }
                   class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
                 >
                   <option value="preserveSafe">{t("settings.preserveSafe")}</option>
-                  <option value="strip">{t("settings.stripAll")}</option>
+                  <option value="stripAll">{t("settings.stripAll")}</option>
+                  <option value="preserveAll">{t("settings.preserveAll")}</option>
                 </select>
               </div>
 
@@ -371,12 +384,37 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
             </div>
           </div>
 
-          <div class="flex justify-end pt-3 border-t border-slate-800">
+          <Show when={saveError()}>
+            <div class="p-3 bg-rose-950/60 border border-rose-800 rounded-xl text-rose-300 text-xs flex items-center justify-between">
+              <span>{t("settings.saveError")}{saveError()}</span>
+              <button
+                type="button"
+                onClick={() => setSaveError(null)}
+                class="text-rose-400 hover:text-rose-200 font-bold ml-2 p-1"
+              >
+                ✕
+              </button>
+            </div>
+          </Show>
+
+          <div class="flex justify-end items-center space-x-3 pt-3 border-t border-slate-800">
             <button
-              onClick={handleSave}
-              class="px-5 py-2 text-xs font-semibold bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-xl transition shadow-lg shadow-sky-500/20"
+              type="button"
+              disabled={isSaving()}
+              onClick={props.onClose}
+              class="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 rounded-xl transition"
             >
-              {t("settings.save")}
+              {t("settings.cancel")}
+            </button>
+            <button
+              type="button"
+              disabled={isSaving()}
+              onClick={handleSave}
+              class="px-5 py-2 text-xs font-semibold bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 rounded-xl transition shadow-lg shadow-sky-500/20 flex items-center space-x-1.5"
+            >
+              <Show when={isSaving()} fallback={<span>{t("settings.save")}</span>}>
+                <span>{t("settings.saving")}</span>
+              </Show>
             </button>
           </div>
         </div>

@@ -171,12 +171,31 @@ fn test_path_validation_and_rejection() {
 
 #[test]
 fn test_settings_security_validation() {
+    // 1. Valid settings with all allowed metadata policies and themes
+    for policy in &["preserveSafe", "stripAll", "preserveAll"] {
+        let valid = AppSettings {
+            metadata_policy: (*policy).into(),
+            ..Default::default()
+        };
+        assert!(validate_settings(&valid).is_ok());
+    }
+
+    for theme in &["dark", "light", "system"] {
+        let valid = AppSettings {
+            theme: (*theme).into(),
+            ..Default::default()
+        };
+        assert!(validate_settings(&valid).is_ok());
+    }
+
+    // 2. Schema version validation
     let invalid_settings = AppSettings {
         schema_version: 999,
         ..Default::default()
     };
     assert!(validate_settings(&invalid_settings).is_err());
 
+    // 3. Null bytes and empty paths
     let null_out = AppSettings {
         output_directory: Some("/tmp/out\0side".into()),
         ..Default::default()
@@ -195,12 +214,23 @@ fn test_settings_security_validation() {
     };
     assert!(validate_settings(&empty_template).is_err());
 
+    // 4. Invalid metadata policies (including legacy "strip" which must fail in favor of "stripAll")
+    let legacy_strip = AppSettings {
+        metadata_policy: "strip".into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        validate_settings(&legacy_strip).unwrap_err().code,
+        ErrorCode::InvalidArgument
+    );
+
     let bad_metadata = AppSettings {
         metadata_policy: "exploitInjectedPolicy".into(),
         ..Default::default()
     };
     assert!(validate_settings(&bad_metadata).is_err());
 
+    // 5. Invalid themes
     let bad_theme = AppSettings {
         theme: "<script>alert(1)</script>".into(),
         ..Default::default()

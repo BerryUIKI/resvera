@@ -491,11 +491,11 @@ export const App: Component = () => {
   };
 
   const handleSaveSettingsModal = async (newSettings: AppSettings) => {
-    setSettings(newSettings);
-    if (newSettings.locale) {
-      setLocale(newSettings.locale as any);
+    const saved = await saveSettings(newSettings);
+    setSettings(saved);
+    if (saved.locale) {
+      setLocale(saved.locale as any);
     }
-    await saveSettings(newSettings);
   };
 
   const currentJob = () => jobs().find((j) => j.id === selectedJobId());
@@ -927,16 +927,21 @@ export const App: Component = () => {
                         {t("controls.outputDir")}
                       </label>
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           const newDir = prompt(t("controls.promptOutputDir"), customOutputDir() || "");
                           if (newDir !== null) {
                             const trimmed = newDir.trim();
-                            setCustomOutputDir(trimmed);
-                            setSettings((prev) => ({
-                              ...prev,
+                            const nextSettings: AppSettings = {
+                              ...settings(),
                               outputDirectory: trimmed.length > 0 ? trimmed : null,
-                            }));
-                            saveSettings(settings());
+                            };
+                            try {
+                              const saved = await saveSettings(nextSettings);
+                              setSettings(saved);
+                              setCustomOutputDir(trimmed);
+                            } catch (err: any) {
+                              alert(err?.message || String(err));
+                            }
                           }
                         }}
                         class="text-[10px] text-sky-400 hover:text-sky-300 transition underline cursor-pointer"
@@ -962,13 +967,18 @@ export const App: Component = () => {
 
                       {customOutputDir() && (
                         <button
-                          onClick={() => {
-                            setCustomOutputDir("");
-                            setSettings((prev) => ({
-                              ...prev,
+                          onClick={async () => {
+                            const nextSettings: AppSettings = {
+                              ...settings(),
                               outputDirectory: null,
-                            }));
-                            saveSettings(settings());
+                            };
+                            try {
+                              const saved = await saveSettings(nextSettings);
+                              setSettings(saved);
+                              setCustomOutputDir("");
+                            } catch (err: any) {
+                              alert(err?.message || String(err));
+                            }
                           }}
                           class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 rounded-lg border border-slate-700 text-xs transition"
                           title={t("controls.resetDir")}
