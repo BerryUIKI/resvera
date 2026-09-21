@@ -550,6 +550,7 @@ pub async fn install_model_impl(
                 };
 
                 // Stream into a temp file in root
+                let _ = std::fs::create_dir_all(&root);
                 let temp_download =
                     root.join(format!(".download-tmp-{}.bin", uuid::Uuid::new_v4()));
                 let mut temp_file = match std::fs::File::create(&temp_download) {
