@@ -771,3 +771,67 @@ fn test_retry_job_ipc_workflow_and_active_state_rejection() {
     let cancelled = cancel_job_impl(&state, &retried.id).unwrap();
     assert_eq!(cancelled.state, "cancelled");
 }
+
+#[test]
+fn test_coordinated_application_shutdown() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::open(temp.path().join("test.db")).unwrap();
+    let models_root = temp.path().join("models");
+    install_test_model(&models_root);
+
+    let engine = Arc::new(OrtEngine::new());
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db.clone(),
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    );
+
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(models_root)),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path: temp.path().join("settings.json"),
+        staging_dir: temp.path().join("staging"),
+    };
+
+    let in_path = temp.path().join("shutdown_input.png");
+    let img = image::RgbImage::new(32, 32);
+    atomic_save_image(&img, &in_path, &OutputFormat::Png, None).unwrap();
+
+    let req = CoreJobRequest {
+        input_path: in_path.to_str().unwrap().to_string(),
+        output_directory: temp.path().to_str().unwrap().to_string(),
+        model_id: "realesrgan-x4plus".to_string(),
+        model_variant_id: "default".to_string(),
+        target_scale: 4,
+        output_format: OutputFormat::Png,
+        overwrite: false,
+        tile_size: Some(32),
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
+        provider_preference: Some("cpu".to_string()),
+    };
+
+    let job = create_upscale_job_impl(&state, req).unwrap();
+    assert_eq!(job.state, "queued");
+
+    // Start background worker
+    let mut worker = QueueWorker::start(state.clone());
+
+    // Coordinate application shutdown with bounded timeout
+    let clean = worker.stop_with_timeout(Duration::from_millis(500));
+    assert!(clean);
+
+    // Queue must be paused and worker stopped
+    assert!(state.orchestrator.is_paused());
+
+    // Job in DB must be in terminal or recoverable state (queued, cancelled, or interrupted)
+    let retrieved = get_job_impl(&state, &job.id).unwrap();
+    assert!(
+        ["queued", "cancelled", "interrupted", "failed"].contains(&retrieved.state.as_str()),
+        "Job must be in a clean persisted state after shutdown, got {}",
+        retrieved.state
+    );
+}
