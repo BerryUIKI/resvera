@@ -1,5 +1,5 @@
 import { Component, For, Show } from "solid-js";
-import { ModelSummary } from "../types/ipc";
+import { ModelInstallProgress, ModelSummary } from "../types/ipc";
 import { useI18n } from "../i18n";
 
 interface ModelCenterModalProps {
@@ -7,8 +7,11 @@ interface ModelCenterModalProps {
   models: ModelSummary[];
   modelsDirectory?: string | null;
   installingModelId?: string | null;
+  installProgress?: ModelInstallProgress | null;
   onClose: () => void;
   onToggleInstall?: (modelId: string) => void;
+  onCancelInstall?: (modelId: string) => void;
+  onImportModel?: (modelId: string) => void;
   onOpenSettings?: () => void;
 }
 
@@ -104,25 +107,56 @@ export const ModelCenterModal: Component<ModelCenterModalProps> = (props) => {
                           {t("modelCenter.remove")}
                         </button>
                       </div>
+                    ) : props.installingModelId === model.id ? (
+                      <div class="flex items-center space-x-2">
+                        <div class="flex flex-col items-end text-xs text-sky-400">
+                          <div class="flex items-center space-x-1.5 font-medium">
+                            <span class="animate-spin inline-block">↻</span>
+                            <span>
+                              {props.installProgress && props.installProgress.fraction > 0
+                                ? `${(props.installProgress.fraction * 100).toFixed(0)}%`
+                                : t("modelCenter.downloading")}
+                            </span>
+                          </div>
+                          {props.installProgress?.totalBytes ? (
+                            <span class="text-[10px] text-slate-400 font-mono">
+                              {((props.installProgress.bytesDownloaded) / 1024 / 1024).toFixed(1)} / {((props.installProgress.totalBytes) / 1024 / 1024).toFixed(1)} MB
+                            </span>
+                          ) : null}
+                        </div>
+                        <button
+                          onClick={() => props.onCancelInstall?.(model.id)}
+                          class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 transition"
+                        >
+                          {t("modelCenter.cancelDownload")}
+                        </button>
+                      </div>
                     ) : (
-                      <button
-                        onClick={() => handleInstall(model.id)}
-                        disabled={props.installingModelId === model.id}
-                        class={`px-4 py-1.5 text-xs font-semibold rounded-lg shadow-md transition flex items-center space-x-1.5 ${
-                          props.installingModelId === model.id
-                            ? "bg-slate-700 text-sky-400 cursor-wait opacity-80"
-                            : "bg-sky-500 hover:bg-sky-400 text-slate-950"
-                        }`}
-                      >
-                        {props.installingModelId === model.id ? (
-                          <>
-                            <span class="animate-spin inline-block mr-1">↻</span>
-                            <span>{t("modelCenter.downloading")}</span>
-                          </>
-                        ) : (
+                      <div class="flex items-center space-x-2">
+                        <button
+                          onClick={() => handleInstall(model.id)}
+                          disabled={Boolean(props.installingModelId)}
+                          class={`px-4 py-1.5 text-xs font-semibold rounded-lg shadow-md transition ${
+                            props.installingModelId
+                              ? "bg-slate-700 text-slate-400 cursor-not-allowed opacity-60"
+                              : "bg-sky-500 hover:bg-sky-400 text-slate-950"
+                          }`}
+                        >
                           <span>{t("modelCenter.download")}</span>
-                        )}
-                      </button>
+                        </button>
+                        <button
+                          onClick={() => props.onImportModel?.(model.id)}
+                          disabled={Boolean(props.installingModelId)}
+                          title={t("modelCenter.importLocal")}
+                          class={`px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-slate-700 transition ${
+                            props.installingModelId
+                              ? "bg-slate-800 text-slate-500 cursor-not-allowed opacity-60"
+                              : "bg-slate-800 hover:bg-slate-700 text-slate-300"
+                          }`}
+                        >
+                          📥 {t("modelCenter.importLocal")}
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>

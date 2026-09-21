@@ -175,5 +175,8 @@ export const zh = {
     localPath: "本地存储于",
     securityGuarantee: "暂存下载在激活前均会严格验证 SHA-256 与 Ed25519 签名。",
     offlineInstallationNote: "若需离线安装，可将官方签名的 .tar.zst 格式模型包放置在模型存储目录中即可识别。",
+    importLocal: "导入本地 ONNX",
+    cancelDownload: "取消下载",
+    importSuccess: "模型导入并校验成功。",
   },
 };

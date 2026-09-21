@@ -3,12 +3,13 @@ use resvera_core::{
     strip_verbatim_prefix, BatchJobRequest as CoreBatchRequest, JobOrchestrator, OrchestratorError,
     UpscaleJobRequest as CoreJobRequest,
 };
-use resvera_models::ModelInstaller;
+use resvera_models::{DownloadError, ModelInstaller, StagedDownloader};
 use resvera_persistence::{DatabaseError, JobRecord, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -31,6 +32,8 @@ pub struct AppState {
     pub settings_path: PathBuf,
     pub staging_dir: PathBuf,
     pub staging_sessions: Arc<Mutex<HashMap<String, StagingUploadSession>>>,
+    pub active_installs: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    pub install_progress: Arc<Mutex<HashMap<String, ModelInstallProgress>>>,
 }
 
 pub fn map_orchestrator_error(err: &OrchestratorError) -> ApiError {
@@ -258,131 +261,48 @@ pub fn get_runtime_status(state: tauri::State<'_, AppState>) -> Result<RuntimeSt
 
 pub fn list_models_impl(models_root: &Path) -> Vec<ModelSummary> {
     let installer = ModelInstaller::new(models_root);
+    let catalog = match resvera_models::load_production_catalog() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to load verified production model catalog: {e}");
+            return Vec::new();
+        }
+    };
 
-    let check_installed =
-        |id: &str| -> bool { installer.get_active_version(id).ok().flatten().is_some() };
-
-    vec![
-        ModelSummary {
-            id: "realesrgan-x4plus".into(),
-            package_version: "1.0.0".into(),
-            display_name: "Real-ESRGAN x4plus".into(),
-            family: "rrdb".into(),
-            category: "photo".into(),
-            native_scales: vec![4],
-            installed: check_installed("realesrgan-x4plus"),
-            update_available: false,
-            download_size_bytes: Some("67051644".into()),
-            license_spdx: "BSD-3-Clause".into(),
-            redistribution_review: "approved".into(),
-            validated_providers: vec!["cpu".into(), "directml".into(), "coreml".into()],
-            variants: vec![ModelVariantSummary {
-                id: "default".into(),
-                native_scale: 4,
-                strength: None,
-            }],
-        },
-        ModelSummary {
-            id: "realesrgan-x4plus-anime".into(),
-            package_version: "1.0.0".into(),
-            display_name: "Real-ESRGAN x4plus Anime (6B)".into(),
-            family: "rrdb-6b".into(),
-            category: "anime".into(),
-            native_scales: vec![4],
-            installed: check_installed("realesrgan-x4plus-anime"),
-            update_available: false,
-            download_size_bytes: Some("17939969".into()),
-            license_spdx: "BSD-3-Clause".into(),
-            redistribution_review: "approved".into(),
-            validated_providers: vec!["cpu".into(), "directml".into(), "coreml".into()],
-            variants: vec![ModelVariantSummary {
-                id: "default".into(),
-                native_scale: 4,
-                strength: None,
-            }],
-        },
-        ModelSummary {
-            id: "real-cugan-2x".into(),
-            package_version: "1.0.0".into(),
-            display_name: "Real-CUGAN 2x".into(),
-            family: "cugan".into(),
-            category: "anime".into(),
-            native_scales: vec![2],
-            installed: check_installed("real-cugan-2x"),
-            update_available: false,
-            download_size_bytes: Some("15204812".into()),
-            license_spdx: "MIT".into(),
-            redistribution_review: "approved".into(),
-            validated_providers: vec!["cpu".into(), "directml".into()],
-            variants: vec![
-                ModelVariantSummary {
-                    id: "no-denoise".into(),
-                    native_scale: 2,
-                    strength: Some("-1".into()),
-                },
-                ModelVariantSummary {
-                    id: "denoise-1".into(),
-                    native_scale: 2,
-                    strength: Some("1".into()),
-                },
-                ModelVariantSummary {
-                    id: "denoise-2".into(),
-                    native_scale: 2,
-                    strength: Some("2".into()),
-                },
-                ModelVariantSummary {
-                    id: "denoise-3".into(),
-                    native_scale: 2,
-                    strength: Some("3".into()),
-                },
-            ],
-        },
-        ModelSummary {
-            id: "real-cugan-4x".into(),
-            package_version: "1.0.0".into(),
-            display_name: "Real-CUGAN 4x".into(),
-            family: "cugan".into(),
-            category: "anime".into(),
-            native_scales: vec![4],
-            installed: check_installed("real-cugan-4x"),
-            update_available: false,
-            download_size_bytes: Some("28145290".into()),
-            license_spdx: "MIT".into(),
-            redistribution_review: "approved".into(),
-            validated_providers: vec!["cpu".into(), "directml".into()],
-            variants: vec![
-                ModelVariantSummary {
-                    id: "no-denoise".into(),
-                    native_scale: 4,
-                    strength: Some("-1".into()),
-                },
-                ModelVariantSummary {
-                    id: "denoise-3".into(),
-                    native_scale: 4,
-                    strength: Some("3".into()),
-                },
-            ],
-        },
-        ModelSummary {
-            id: "real-hat-gan-4x".into(),
-            package_version: "1.0.0".into(),
-            display_name: "Real-HAT-GAN 4x".into(),
-            family: "hat".into(),
-            category: "photo".into(),
-            native_scales: vec![4],
-            installed: check_installed("real-hat-gan-4x"),
-            update_available: false,
-            download_size_bytes: Some("76483920".into()),
-            license_spdx: "Apache-2.0".into(),
-            redistribution_review: "approved".into(),
-            validated_providers: vec!["cpu".into(), "directml".into(), "cuda".into()],
-            variants: vec![ModelVariantSummary {
-                id: "default".into(),
-                native_scale: 4,
-                strength: None,
-            }],
-        },
-    ]
+    catalog
+        .models
+        .into_iter()
+        .map(|entry| {
+            let installed = installer
+                .get_active_version(&entry.id)
+                .ok()
+                .flatten()
+                .is_some();
+            ModelSummary {
+                id: entry.id,
+                package_version: entry.version,
+                display_name: entry.display_name,
+                family: entry.family,
+                category: entry.category,
+                native_scales: entry.native_scales,
+                installed,
+                update_available: false,
+                download_size_bytes: Some(entry.size_bytes.to_string()),
+                license_spdx: entry.license_spdx,
+                redistribution_review: entry.redistribution_review,
+                validated_providers: entry.validated_providers,
+                variants: entry
+                    .variants
+                    .into_iter()
+                    .map(|v| ModelVariantSummary {
+                        id: v.id,
+                        native_scale: v.native_scale,
+                        strength: v.strength,
+                    })
+                    .collect(),
+            }
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -453,17 +373,10 @@ pub fn uninstall_model(
     uninstall_model_impl(&state, model_id)
 }
 
-const IDENTITY_NCHW_ONNX: &[u8] = &[
-    8, 8, 18, 13, 114, 101, 115, 118, 101, 114, 97, 45, 116, 101, 115, 116, 115, 58, 126, 10, 25,
-    10, 5, 105, 110, 112, 117, 116, 18, 6, 111, 117, 116, 112, 117, 116, 34, 8, 73, 100, 101, 110,
-    116, 105, 116, 121, 18, 8, 105, 100, 101, 110, 116, 105, 116, 121, 90, 42, 10, 5, 105, 110,
-    112, 117, 116, 18, 33, 10, 31, 8, 1, 18, 27, 10, 2, 8, 1, 10, 2, 8, 3, 10, 8, 18, 6, 104, 101,
-    105, 103, 104, 116, 10, 7, 18, 5, 119, 105, 100, 116, 104, 98, 43, 10, 6, 111, 117, 116, 112,
-    117, 116, 18, 33, 10, 31, 8, 1, 18, 27, 10, 2, 8, 1, 10, 2, 8, 3, 10, 8, 18, 6, 104, 101, 105,
-    103, 104, 116, 10, 7, 18, 5, 119, 105, 100, 116, 104, 66, 2, 16, 13,
-];
-
-pub fn install_model_impl(state: &AppState, model_id: String) -> Result<ModelSummary, ApiError> {
+pub async fn install_model_impl(
+    state: &AppState,
+    model_id: String,
+) -> Result<ModelSummary, ApiError> {
     if model_id.trim().is_empty()
         || model_id.contains('\0')
         || model_id.contains('/')
@@ -478,187 +391,565 @@ pub fn install_model_impl(state: &AppState, model_id: String) -> Result<ModelSum
     }
 
     let root = state.models_root.lock().unwrap().clone();
-    let available_models = list_models_impl(&root);
-    let target = available_models
+    let installer = ModelInstaller::new(&root);
+
+    // If already installed, return summary immediately
+    if installer
+        .get_active_version(&model_id)
+        .ok()
+        .flatten()
+        .is_some()
+    {
+        let models = list_models_impl(&root);
+        if let Some(summary) = models.into_iter().find(|m| m.id == model_id) {
+            return Ok(summary);
+        }
+    }
+
+    let catalog = resvera_models::load_production_catalog().map_err(|e| ApiError {
+        code: ErrorCode::SignatureInvalid,
+        message: format!("Failed to verify production catalog: {e}"),
+        details: None,
+        retryable: false,
+    })?;
+
+    let entry = catalog
+        .models
         .into_iter()
         .find(|m| m.id == model_id)
         .ok_or_else(|| ApiError {
             code: ErrorCode::ModelNotFound,
-            message: format!("Unknown model '{model_id}'"),
+            message: format!("Unknown model '{model_id}' in verified catalog"),
             details: None,
             retryable: false,
         })?;
 
-    // Create a temporary staging directory to construct the package
-    let stage_dir = root.join(format!(".staging-{}", uuid::Uuid::new_v4()));
-    let artifacts_dir = stage_dir.join("artifacts");
-    std::fs::create_dir_all(&artifacts_dir).map_err(|e| ApiError {
-        code: ErrorCode::StorageFailure,
-        message: format!("Failed to create staging directory: {e}"),
-        details: None,
-        retryable: true,
-    })?;
+    // Create cooperative cancellation token and register it
+    let cancel_token = Arc::new(AtomicBool::new(false));
+    {
+        let mut installs = state.active_installs.lock().unwrap();
+        installs.insert(model_id.clone(), cancel_token.clone());
+    }
 
-    let artifact_path = artifacts_dir.join("model.onnx");
+    // Set initial progress
+    let initial_progress = ModelInstallProgress {
+        model_id: model_id.clone(),
+        bytes_downloaded: 0,
+        total_bytes: entry.size_bytes,
+        fraction: 0.0,
+        stage: "starting".into(),
+    };
+    {
+        let mut progress_map = state.install_progress.lock().unwrap();
+        progress_map.insert(model_id.clone(), initial_progress);
+    }
 
-    // Check candidate paths for real exported models in workspace / artifacts / runtime
-    let candidate_paths = [
-        PathBuf::from(format!("artifacts/exports/{model_id}/model.onnx")),
-        PathBuf::from(format!("../artifacts/exports/{model_id}/model.onnx")),
-        std::env::current_exe()
+    let downloader = StagedDownloader::new(&root);
+
+    // If weights already exist in local export fixtures or test paths, use staged reader
+    let candidate_fixtures = [
+        std::env::var("RESVERA_TEST_MODEL_FIXTURE")
             .ok()
-            .and_then(|p| {
-                p.parent()
-                    .map(|d| d.join(format!("artifacts/exports/{model_id}/model.onnx")))
-            })
-            .unwrap_or_default(),
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| {
-                p.parent()
-                    .map(|d| d.join(format!("../artifacts/exports/{model_id}/model.onnx")))
-            })
-            .unwrap_or_default(),
+            .map(PathBuf::from),
+        Some(PathBuf::from(format!(
+            "artifacts/exports/{model_id}/model.onnx"
+        ))),
+        Some(PathBuf::from(format!(
+            "../artifacts/exports/{model_id}/model.onnx"
+        ))),
+        Some(PathBuf::from(format!(
+            "../../artifacts/exports/{model_id}/model.onnx"
+        ))),
+        Some(PathBuf::from(format!("artifacts/exports/{model_id}.onnx"))),
+        Some(PathBuf::from(format!(
+            "../artifacts/exports/{model_id}.onnx"
+        ))),
     ];
-    let real_source = candidate_paths
-        .into_iter()
-        .find(|p| p.exists() && p.is_file());
 
-    let (artifact_size, artifact_hash) = if let Some(src) = real_source {
-        std::fs::copy(&src, &artifact_path).map_err(|e| ApiError {
+    let mut fixture_path: Option<PathBuf> = None;
+    for cand in candidate_fixtures.into_iter().flatten() {
+        if cand.is_file() {
+            if let Ok(meta) = std::fs::metadata(&cand) {
+                if meta.len() == entry.size_bytes {
+                    fixture_path = Some(cand);
+                    break;
+                }
+            }
+        }
+    }
+
+    let install_result = if let Some(local_path) = fixture_path {
+        let mut file = std::fs::File::open(&local_path).map_err(|e| ApiError {
             code: ErrorCode::StorageFailure,
-            message: format!("Failed to copy model weights from {}: {e}", src.display()),
+            message: format!("Failed opening local model fixture: {e}"),
             details: None,
-            retryable: true,
+            retryable: false,
         })?;
-        let size = std::fs::metadata(&artifact_path)
-            .map(|m| m.len() as usize)
-            .unwrap_or(0);
-        let hash = resvera_models::compute_file_sha256(&artifact_path).map_err(|e| ApiError {
-            code: ErrorCode::StorageFailure,
-            message: format!("Failed to compute model artifact hash: {e}"),
-            details: None,
-            retryable: true,
-        })?;
-        (size, hash)
+
+        let model_id_clone = model_id.clone();
+        let progress_state = state.install_progress.clone();
+
+        let mut progress_callback = |downloaded: u64, total: u64| {
+            let fraction = if total > 0 {
+                (downloaded as f32) / (total as f32)
+            } else {
+                0.0
+            };
+            let prog = ModelInstallProgress {
+                model_id: model_id_clone.clone(),
+                bytes_downloaded: downloaded,
+                total_bytes: total,
+                fraction,
+                stage: "downloading".into(),
+            };
+            let mut map = progress_state.lock().unwrap();
+            map.insert(model_id_clone.clone(), prog);
+        };
+
+        downloader.stage_and_install_reader(
+            &entry,
+            &mut file,
+            "",
+            &resvera_models::RESVERA_PRODUCTION_TRUST_ROOT,
+            Some(&cancel_token),
+            Some(&mut progress_callback),
+        )
     } else {
-        std::fs::write(&artifact_path, IDENTITY_NCHW_ONNX).map_err(|e| ApiError {
-            code: ErrorCode::StorageFailure,
-            message: format!("Failed to write model weights: {e}"),
-            details: None,
-            retryable: true,
-        })?;
-        let hash = resvera_models::compute_file_sha256(&artifact_path).map_err(|e| ApiError {
-            code: ErrorCode::StorageFailure,
-            message: format!("Failed to compute model artifact hash: {e}"),
-            details: None,
-            retryable: true,
-        })?;
-        (IDENTITY_NCHW_ONNX.len(), hash)
+        // Attempt network download from download_urls
+        let mut downloaded_path: Option<PathBuf> = None;
+        let mut last_err = String::from("No reachable download URLs available");
+
+        let tls_config = ureq::tls::TlsConfig::builder()
+            .provider(ureq::tls::TlsProvider::NativeTls)
+            .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+            .build();
+
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(60)))
+            .tls_config(tls_config)
+            .http_status_as_error(false)
+            .build()
+            .into();
+
+        for url in &entry.download_urls {
+            if cancel_token.load(Ordering::Relaxed) {
+                break;
+            }
+
+            if url.starts_with("http://") || url.starts_with("https://") {
+                let mut resp = match agent.get(url).call() {
+                    Ok(r) if r.status().is_success() => r,
+                    Ok(r) => {
+                        last_err = format!("Server returned HTTP status {}", r.status());
+                        continue;
+                    }
+                    Err(e) => {
+                        last_err = format!("Network request to {url} failed: {e}");
+                        continue;
+                    }
+                };
+
+                // Stream into a temp file in root
+                let temp_download =
+                    root.join(format!(".download-tmp-{}.bin", uuid::Uuid::new_v4()));
+                let mut temp_file = match std::fs::File::create(&temp_download) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        last_err = format!("Failed to create temporary download file: {e}");
+                        continue;
+                    }
+                };
+
+                let mut reader = resp.body_mut().as_reader();
+                let mut downloaded_bytes: u64 = 0;
+                let mut stream_failed = false;
+                let mut buf = [0u8; 65536];
+
+                loop {
+                    if cancel_token.load(Ordering::Relaxed) {
+                        let _ = std::fs::remove_file(&temp_download);
+                        stream_failed = true;
+                        break;
+                    }
+
+                    match reader.read(&mut buf) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            if let Err(e) = temp_file.write_all(&buf[..n]) {
+                                last_err = format!("Failed writing download chunk: {e}");
+                                stream_failed = true;
+                                break;
+                            }
+                            downloaded_bytes += n as u64;
+
+                            let total_bytes = entry.size_bytes;
+                            let fraction = if total_bytes > 0 {
+                                (downloaded_bytes as f32) / (total_bytes as f32)
+                            } else {
+                                0.0
+                            };
+                            let prog = ModelInstallProgress {
+                                model_id: model_id.clone(),
+                                bytes_downloaded: downloaded_bytes,
+                                total_bytes,
+                                fraction,
+                                stage: "downloading".into(),
+                            };
+                            {
+                                let mut map = state.install_progress.lock().unwrap();
+                                map.insert(model_id.clone(), prog);
+                            }
+                        }
+                        Err(e) => {
+                            last_err = format!("Download stream failed: {e}");
+                            stream_failed = true;
+                            break;
+                        }
+                    }
+                }
+
+                if stream_failed {
+                    let _ = std::fs::remove_file(&temp_download);
+                    continue;
+                }
+                let _ = temp_file.flush();
+                drop(temp_file);
+
+                if cancel_token.load(Ordering::Relaxed) {
+                    let _ = std::fs::remove_file(&temp_download);
+                    break;
+                }
+
+                // Verify and stage the downloaded artifact
+                let staged_res = downloader.import_local_file(
+                    &entry,
+                    &temp_download,
+                    "",
+                    &resvera_models::RESVERA_PRODUCTION_TRUST_ROOT,
+                );
+                let _ = std::fs::remove_file(&temp_download);
+
+                match staged_res {
+                    Ok(p) => {
+                        downloaded_path = Some(p);
+                        break;
+                    }
+                    Err(e) => {
+                        last_err = format!("Validation of downloaded artifact failed: {e}");
+                    }
+                }
+            }
+        }
+
+        if let Some(p) = downloaded_path {
+            Ok(p)
+        } else if cancel_token.load(Ordering::Relaxed) {
+            Err(DownloadError::Cancelled)
+        } else {
+            Err(DownloadError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Model artifact source unavailable for {model_id}: {last_err}"),
+            )))
+        }
     };
 
-    let variants_spec: Vec<serde_json::Value> = target
-        .variants
-        .iter()
-        .map(|v| {
-            serde_json::json!({
-                "id": v.id,
-                "native_scale": v.native_scale,
-                "strength": v.strength,
-                "artifact": "artifacts/model.onnx"
-            })
-        })
-        .collect();
+    // Remove active install token
+    {
+        let mut installs = state.active_installs.lock().unwrap();
+        installs.remove(&model_id);
+    }
 
-    let manifest_json = serde_json::json!({
-        "schema_version": 1,
-        "id": target.id,
-        "package_version": target.package_version,
-        "display_name": target.display_name,
-        "family": target.family,
-        "category": target.category,
-        "description": format!("Model package for {}", target.display_name),
-        "license": {
-            "spdx": target.license_spdx,
-            "upstream_url": "https://github.com/xinntao/Real-ESRGAN",
-            "redistribution_review": target.redistribution_review
-        },
-        "provenance": {
-            "upstream_repository": "https://github.com/xinntao/Real-ESRGAN",
-            "upstream_revision": "v0.3.0",
-            "source_weight_name": format!("{}.pth", target.id),
-            "source_weight_sha256": "0".repeat(64),
-            "export_recipe": "official-onnx-export"
-        },
-        "variants": variants_spec,
-        "tensor": {
-            "input_name": "input",
-            "output_name": "output",
-            "layout": "NCHW",
-            "channels": "RGB",
-            "input_range": [0.0, 1.0],
-            "output_range": [0.0, 1.0],
-            "element_type": "float32"
-        },
-        "tiling": {
-            "alignment": 1,
-            "minimum": 32,
-            "recommended": 256,
-            "overlap": 16,
-            "window_size": null,
-            "static_shapes_required": false
-        },
-        "compatibility": {
-            "engine": "onnx-runtime",
-            "minimum_engine_version": "1.16.0",
-            "validated_providers": target.validated_providers,
-            "validated_precisions": ["fp32"]
-        },
-        "artifacts": [
+    match install_result {
+        Ok(_) => {
+            let final_progress = ModelInstallProgress {
+                model_id: model_id.clone(),
+                bytes_downloaded: entry.size_bytes,
+                total_bytes: entry.size_bytes,
+                fraction: 1.0,
+                stage: "completed".into(),
+            };
             {
-                "path": "artifacts/model.onnx",
-                "size_bytes": artifact_size,
-                "sha256": artifact_hash
+                let mut map = state.install_progress.lock().unwrap();
+                map.insert(model_id.clone(), final_progress);
             }
-        ]
-    });
 
-    let manifest_path = stage_dir.join("manifest.json");
-    if let Err(e) = std::fs::write(
-        &manifest_path,
-        serde_json::to_vec_pretty(&manifest_json).unwrap(),
-    ) {
-        let _ = std::fs::remove_dir_all(&stage_dir);
-        return Err(ApiError {
-            code: ErrorCode::StorageFailure,
-            message: format!("Failed to write manifest.json: {e}"),
-            details: None,
-            retryable: true,
-        });
+            let models = list_models_impl(&root);
+            models
+                .into_iter()
+                .find(|m| m.id == model_id)
+                .ok_or_else(|| ApiError {
+                    code: ErrorCode::Internal,
+                    message: "Model installed but failed to query status".into(),
+                    details: None,
+                    retryable: false,
+                })
+        }
+        Err(DownloadError::Cancelled) => {
+            let final_progress = ModelInstallProgress {
+                model_id: model_id.clone(),
+                bytes_downloaded: 0,
+                total_bytes: entry.size_bytes,
+                fraction: 0.0,
+                stage: "cancelled".into(),
+            };
+            {
+                let mut map = state.install_progress.lock().unwrap();
+                map.insert(model_id.clone(), final_progress);
+            }
+            Err(ApiError {
+                code: ErrorCode::Cancelled,
+                message: "Model installation was cancelled".into(),
+                details: None,
+                retryable: false,
+            })
+        }
+        Err(DownloadError::HashMismatch { expected, calculated }) => {
+            Err(ApiError {
+                code: ErrorCode::HashMismatch,
+                message: format!("Model artifact integrity check failed: expected {expected}, calculated {calculated}"),
+                details: None,
+                retryable: false,
+            })
+        }
+        Err(DownloadError::SignatureInvalid(msg)) => {
+            Err(ApiError {
+                code: ErrorCode::SignatureInvalid,
+                message: format!("Model catalog signature or manifest verification failed: {msg}"),
+                details: None,
+                retryable: false,
+            })
+        }
+        Err(DownloadError::Install(e)) => {
+            Err(ApiError {
+                code: ErrorCode::ModelInvalid,
+                message: format!("Failed to activate model: {e}"),
+                details: None,
+                retryable: false,
+            })
+        }
+        Err(DownloadError::Io(e)) => {
+            Err(ApiError {
+                code: ErrorCode::DownloadFailed,
+                message: format!("Failed to download model: {e}"),
+                details: None,
+                retryable: true,
+            })
+        }
     }
-
-    let installer = ModelInstaller::new(&root);
-    if let Err(e) = installer.install_package(&stage_dir) {
-        let _ = std::fs::remove_dir_all(&stage_dir);
-        return Err(ApiError {
-            code: ErrorCode::ModelInvalid,
-            message: format!("Failed to install model package: {e}"),
-            details: None,
-            retryable: false,
-        });
-    }
-
-    let mut installed_summary = target;
-    installed_summary.installed = true;
-    Ok(installed_summary)
 }
 
 #[tauri::command]
-pub fn install_model(
+pub async fn install_model(
     state: tauri::State<'_, AppState>,
     model_id: String,
 ) -> Result<ModelSummary, ApiError> {
-    install_model_impl(&state, model_id)
+    install_model_impl(&state, model_id).await
+}
+
+pub fn cancel_model_install_impl(state: &AppState, model_id: String) -> Result<bool, ApiError> {
+    let installs = state.active_installs.lock().unwrap();
+    if let Some(token) = installs.get(&model_id) {
+        token.store(true, Ordering::SeqCst);
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+pub fn cancel_model_install(
+    state: tauri::State<'_, AppState>,
+    model_id: String,
+) -> Result<bool, ApiError> {
+    cancel_model_install_impl(&state, model_id)
+}
+
+pub fn import_model_file_impl(
+    state: &AppState,
+    path: String,
+    model_id: Option<String>,
+) -> Result<ModelSummary, ApiError> {
+    let source_path = PathBuf::from(&path);
+    if !source_path.exists() {
+        return Err(ApiError {
+            code: ErrorCode::FileNotFound,
+            message: format!("File not found: {path}"),
+            details: None,
+            retryable: false,
+        });
+    }
+
+    let root = state.models_root.lock().unwrap().clone();
+    let installer = ModelInstaller::new(&root);
+
+    if source_path.is_dir() {
+        let manifest_path = source_path.join("manifest.json");
+        if !manifest_path.exists() {
+            return Err(ApiError {
+                code: ErrorCode::ModelInvalid,
+                message: "Directory does not contain a manifest.json".into(),
+                details: None,
+                retryable: false,
+            });
+        }
+
+        let installed = installer
+            .install_package(&source_path)
+            .map_err(|e| ApiError {
+                code: ErrorCode::ModelInvalid,
+                message: format!("Failed to install package directory: {e}"),
+                details: None,
+                retryable: false,
+            })?;
+
+        let models = list_models_impl(&root);
+        return models
+            .into_iter()
+            .find(|m| m.id == installed.id)
+            .ok_or_else(|| ApiError {
+                code: ErrorCode::Internal,
+                message: "Model imported but failed to query status".into(),
+                details: None,
+                retryable: false,
+            });
+    }
+
+    let catalog = resvera_models::load_production_catalog().map_err(|e| ApiError {
+        code: ErrorCode::SignatureInvalid,
+        message: format!("Failed to load production catalog: {e}"),
+        details: None,
+        retryable: false,
+    })?;
+
+    let target_id = if let Some(id) = model_id {
+        id
+    } else {
+        let stem = source_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if catalog.models.iter().any(|m| m.id == stem) {
+            stem
+        } else {
+            let parent_name = source_path
+                .parent()
+                .and_then(|p| p.file_name())
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if catalog.models.iter().any(|m| m.id == parent_name) {
+                parent_name
+            } else {
+                return Err(ApiError {
+                    code: ErrorCode::InvalidArgument,
+                    message:
+                        "Cannot infer target model ID from file path. Please specify model ID."
+                            .into(),
+                    details: None,
+                    retryable: false,
+                });
+            }
+        }
+    };
+
+    let entry = catalog
+        .models
+        .into_iter()
+        .find(|m| m.id == target_id)
+        .ok_or_else(|| ApiError {
+            code: ErrorCode::ModelNotFound,
+            message: format!("Unknown model '{target_id}'"),
+            details: None,
+            retryable: false,
+        })?;
+
+    let downloader = StagedDownloader::new(&root);
+    downloader
+        .import_local_file(
+            &entry,
+            &source_path,
+            "",
+            &resvera_models::RESVERA_PRODUCTION_TRUST_ROOT,
+        )
+        .map_err(|e| match e {
+            DownloadError::HashMismatch {
+                expected,
+                calculated,
+            } => ApiError {
+                code: ErrorCode::HashMismatch,
+                message: format!(
+                    "Artifact checksum mismatch: expected {expected}, calculated {calculated}"
+                ),
+                details: None,
+                retryable: false,
+            },
+            DownloadError::SignatureInvalid(s) => ApiError {
+                code: ErrorCode::SignatureInvalid,
+                message: s,
+                details: None,
+                retryable: false,
+            },
+            _ => ApiError {
+                code: ErrorCode::ModelInvalid,
+                message: e.to_string(),
+                details: None,
+                retryable: false,
+            },
+        })?;
+
+    let models = list_models_impl(&root);
+    models
+        .into_iter()
+        .find(|m| m.id == target_id)
+        .ok_or_else(|| ApiError {
+            code: ErrorCode::Internal,
+            message: "Model imported but failed to query status".into(),
+            details: None,
+            retryable: false,
+        })
+}
+
+#[tauri::command]
+pub fn import_model_file(
+    state: tauri::State<'_, AppState>,
+    path: String,
+    model_id: Option<String>,
+) -> Result<ModelSummary, ApiError> {
+    import_model_file_impl(&state, path, model_id)
+}
+
+pub fn get_model_install_progress_impl(
+    state: &AppState,
+    model_id: String,
+) -> Option<ModelInstallProgress> {
+    let progress_map = state.install_progress.lock().unwrap();
+    progress_map.get(&model_id).cloned()
+}
+
+#[tauri::command]
+pub fn get_model_install_progress(
+    state: tauri::State<'_, AppState>,
+    model_id: String,
+) -> Option<ModelInstallProgress> {
+    get_model_install_progress_impl(&state, model_id)
+}
+
+#[tauri::command]
+pub async fn pick_model_file() -> Result<Option<String>, ApiError> {
+    tokio::task::spawn_blocking(|| {
+        let file = rfd::FileDialog::new()
+            .add_filter("Model Artifact", &["onnx", "pth", "zst", "json"])
+            .set_title("Select Model File or Manifest")
+            .pick_file();
+
+        Ok(file.map(|f| f.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(|e| ApiError {
+        code: ErrorCode::Internal,
+        message: e.to_string(),
+        details: None,
+        retryable: false,
+    })?
 }
 
 pub fn stage_input_image_impl(

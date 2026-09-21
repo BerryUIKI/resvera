@@ -104,6 +104,16 @@ pub struct ModelVariantSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInstallProgress {
+    pub model_id: String,
+    pub bytes_downloaded: u64,
+    pub total_bytes: u64,
+    pub fraction: f32,
+    pub stage: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ProviderPreference {
     Automatic,
