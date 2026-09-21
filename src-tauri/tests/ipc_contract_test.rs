@@ -426,6 +426,41 @@ fn test_uninstall_model_success_and_validation() {
         ErrorCode::InvalidArgument
     );
 
+    // Attempting to uninstall when an active/queued job references the model fails with ModelInUse
+    let job = resvera_persistence::JobRecord {
+        id: "active-job-1".into(),
+        state: "queued".into(),
+        input_path: "/dummy.png".into(),
+        output_path: None,
+        preview_path: None,
+        model_id: "realesrgan-x4plus".into(),
+        model_package_version: "1.0.0".into(),
+        model_variant_id: "default".into(),
+        target_scale: 4,
+        engine_id: "ort".into(),
+        provider_id: None,
+        progress_fraction: 0.0,
+        progress_stage: "queued".into(),
+        error_code: None,
+        error_message: None,
+        output_directory: None,
+        output_format_json: None,
+        overwrite: false,
+        tile_size: None,
+        created_at: "2026-09-20T00:00:00Z".into(),
+        updated_at: "2026-09-20T00:00:00Z".into(),
+    };
+    state.orchestrator.db.insert_job(&job).unwrap();
+
+    let in_use_err = uninstall_model_impl(&state, "realesrgan-x4plus".into()).unwrap_err();
+    assert_eq!(in_use_err.code, ErrorCode::ModelInUse);
+    assert!(in_use_err
+        .message
+        .contains("referenced by 1 active or queued job(s)"));
+
+    // Once the job transitions to terminal state, uninstall succeeds
+    state.orchestrator.db.cancel_job("active-job-1").unwrap();
+
     // Uninstall installed model successfully
     let uninstalled = uninstall_model_impl(&state, "realesrgan-x4plus".into()).unwrap();
     assert!(uninstalled);
@@ -536,8 +571,9 @@ fn test_save_settings_dynamic_models_root() {
     };
     save_settings_impl(&state, updated_settings).unwrap();
 
-    // models_root in AppState should now be updated to root_b
+    // models_root in AppState and orchestrator should now both be updated to root_b
     assert_eq!(*state.models_root.lock().unwrap(), root_b);
+    assert_eq!(state.orchestrator.models_root(), root_b);
 
     // list_models_impl against updated models_root now reports installed: false
     let models_switched = list_models_impl(&state.models_root.lock().unwrap());

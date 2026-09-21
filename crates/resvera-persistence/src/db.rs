@@ -436,6 +436,19 @@ impl AppDatabase {
         Ok(affected)
     }
 
+    /// Returns the number of active (non-terminal: queued, preparing, running, finalizing) jobs
+    /// that reference the specified model_id.
+    pub fn count_active_jobs_for_model(&self, model_id: &str) -> Result<usize, DatabaseError> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM jobs 
+             WHERE model_id = ?1 AND state IN ('queued', 'preparing', 'running', 'finalizing')",
+            params![model_id],
+            |row| row.get(0),
+        )?;
+        Ok(count as usize)
+    }
+
     /// Lists recent jobs up to the specified limit, ordered by creation time descending.
     pub fn list_recent_jobs(&self, limit: usize) -> Result<Vec<JobRecord>, DatabaseError> {
         let conn = self.conn.lock().unwrap();
@@ -679,5 +692,27 @@ mod tests {
         assert_eq!(list.len(), 2);
         let list_limited = db.list_recent_jobs(1).unwrap();
         assert_eq!(list_limited.len(), 1);
+    }
+
+    #[test]
+    fn test_count_active_jobs_for_model() {
+        let db = AppDatabase::new_in_memory().unwrap();
+        let mut j1 = make_sample_job("job-1", "queued");
+        j1.model_id = "test-model".into();
+        let mut j2 = make_sample_job("job-2", "running");
+        j2.model_id = "test-model".into();
+        let mut j3 = make_sample_job("job-3", "succeeded");
+        j3.model_id = "test-model".into();
+        let mut j4 = make_sample_job("job-4", "queued");
+        j4.model_id = "other-model".into();
+
+        db.insert_job(&j1).unwrap();
+        db.insert_job(&j2).unwrap();
+        db.insert_job(&j3).unwrap();
+        db.insert_job(&j4).unwrap();
+
+        assert_eq!(db.count_active_jobs_for_model("test-model").unwrap(), 2);
+        assert_eq!(db.count_active_jobs_for_model("other-model").unwrap(), 1);
+        assert_eq!(db.count_active_jobs_for_model("unused-model").unwrap(), 0);
     }
 }

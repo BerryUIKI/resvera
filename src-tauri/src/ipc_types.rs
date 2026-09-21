@@ -186,7 +186,7 @@ impl Default for AppSettings {
         Self {
             schema_version: 1,
             output_directory: None,
-            models_directory: Some("~/.resvera/models".into()),
+            models_directory: None,
             output_format: OutputFormat::Png,
             default_model_id: Some("realesrgan-x4plus".into()),
             default_model_variant_id: Some("default".into()),
