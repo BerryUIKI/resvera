@@ -399,5 +399,3 @@ export async function readImageData(path: string): Promise<string> {
   }
   return path;
 }
-
-

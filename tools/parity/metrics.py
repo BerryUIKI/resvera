@@ -95,4 +95,3 @@ def compute_ssim(
             numerator = (2 * mu_a * mu_b + c1) * (2 * sigma_ab + c2)
             denominator = (mu_a ** 2 + mu_b ** 2 + c1) * (sigma_a_sq + sigma_b_sq + c2)
             return float(numerator / denominator)
-
