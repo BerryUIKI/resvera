@@ -55,6 +55,7 @@ export async function getRuntimeStatus(): Promise<RuntimeStatus> {
       displayName: "Browser Preview Mode (Runtime Unavailable)",
       version: "0.0.0",
       healthy: false,
+      supportsFp16: false,
       diagnostic: "Resvera native desktop runtime (Tauri v2 + ONNX Runtime) is required for inference and model execution.",
     },
     providers: [

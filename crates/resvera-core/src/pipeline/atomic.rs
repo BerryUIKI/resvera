@@ -12,13 +12,12 @@ pub fn generate_output_path(
     target_scale: u32,
     format: &OutputFormat,
     overwrite: bool,
+    template: Option<&str>,
 ) -> PathBuf {
     let raw_stem = input_path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("image");
-    let stem = sanitize_filename_component(raw_stem);
-    let model_safe = sanitize_filename_component(model_id);
 
     let ext = match format {
         OutputFormat::SameAsInput => input_path
@@ -31,19 +30,28 @@ pub fn generate_output_path(
     };
     let safe_ext = sanitize_filename_component(ext.trim_start_matches('.'));
 
-    let base_name = format!("{}_{}_{}x.{}", stem, model_safe, target_scale, safe_ext);
-    let initial_path = output_dir.join(&base_name);
+    let formatted_filename = crate::pipeline::naming::format_output_filename(
+        template.unwrap_or("{stem}_{model}_{scale}x"),
+        raw_stem,
+        model_id,
+        target_scale,
+        &safe_ext,
+    );
+
+    let initial_path = output_dir.join(&formatted_filename);
 
     if overwrite || !initial_path.exists() {
         return initial_path;
     }
 
+    let formatted_stem = Path::new(&formatted_filename)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("image");
+
     let mut counter = 1;
     loop {
-        let candidate_name = format!(
-            "{}_{}_{}x_{}.{}",
-            stem, model_safe, target_scale, counter, safe_ext
-        );
+        let candidate_name = format!("{formatted_stem}_{counter}.{safe_ext}");
         let candidate_path = output_dir.join(&candidate_name);
         if !candidate_path.exists() {
             return candidate_path;

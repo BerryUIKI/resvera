@@ -68,8 +68,6 @@ export const App: Component = () => {
   const [selectedTileSize, setSelectedTileSize] = createSignal<number | null>(null);
   const [selectedTileOverlap, setSelectedTileOverlap] = createSignal(16);
   const [selectedBlendMode, setSelectedBlendMode] = createSignal("cosine");
-  const [cuganPaddingMode, setCuganPaddingMode] = createSignal("reflect");
-  const [esrganDenoise, setEsrganDenoise] = createSignal(0.5);
 
   const selectedModel = () => models().find((m) => m.id === selectedModelId());
   const maxModelScale = () => {
@@ -187,7 +185,11 @@ export const App: Component = () => {
         setSelectedBlendMode(appSettings.blendMode);
       }
       if (appSettings.precision) {
-        setSelectedPrecision(appSettings.precision);
+        if (appSettings.precision === "fp16" && !status?.engine.supportsFp16) {
+          setSelectedPrecision("fp32");
+        } else {
+          setSelectedPrecision(appSettings.precision);
+        }
       }
       if (appSettings.providerPreference) {
         if (appSettings.providerPreference.kind === "specific") {
@@ -243,8 +245,8 @@ export const App: Component = () => {
     if (fmt === "webp") {
       return {
         kind: "webp",
-        lossless: webpLossless(),
-        quality: webpLossless() ? null : jpegQuality(),
+        lossless: true,
+        quality: null,
       };
     }
     return { kind: "png" };
@@ -286,6 +288,9 @@ export const App: Component = () => {
     const effFormat = getEffectiveOutputFormat();
     const effOverwrite = overwrite();
     const effTileSize = selectedTileSize();
+    const effTileOverlap = selectedTileOverlap();
+    const effBlendMode = selectedBlendMode();
+    const effNamingTemplate = settings().namingTemplate || "{stem}_{model}_{scale}x";
     const effProvider = selectedProvider() === "automatic" ? null : selectedProvider();
 
     try {
@@ -298,6 +303,9 @@ export const App: Component = () => {
         outputFormat: effFormat,
         overwrite: effOverwrite,
         tileSize: effTileSize,
+        tileOverlap: effTileOverlap,
+        blendMode: effBlendMode,
+        namingTemplate: effNamingTemplate,
         providerPreference: effProvider,
       });
       setSelectedJobId(created.id);
@@ -346,6 +354,9 @@ export const App: Component = () => {
     const effFormat = getEffectiveOutputFormat();
     const effOverwrite = overwrite();
     const effTileSize = selectedTileSize();
+    const effTileOverlap = selectedTileOverlap();
+    const effBlendMode = selectedBlendMode();
+    const effNamingTemplate = settings().namingTemplate || "{stem}_{model}_{scale}x";
     const effProvider = selectedProvider() === "automatic" ? null : selectedProvider();
 
     let failureCount = 0;
@@ -364,6 +375,9 @@ export const App: Component = () => {
           outputFormat: effFormat,
           overwrite: effOverwrite,
           tileSize: effTileSize,
+          tileOverlap: effTileOverlap,
+          blendMode: effBlendMode,
+          namingTemplate: effNamingTemplate,
           providerPreference: effProvider,
         });
         setSelectedJobId(created.id);
@@ -704,16 +718,19 @@ export const App: Component = () => {
                     </div>
 
                     <div class="space-y-1.5">
-                      <label class="text-[11px] font-medium text-slate-400">{t("controls.paddingMode")}</label>
+                      <div class="flex items-center justify-between">
+                        <label class="text-[11px] font-medium text-slate-400">{t("controls.paddingMode")}</label>
+                        <span class="text-[10px] text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">18px Reflection</span>
+                      </div>
                       <select
-                        value={cuganPaddingMode()}
-                        onChange={(e) => setCuganPaddingMode(e.currentTarget.value)}
-                        class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
+                        disabled
+                        value="reflect"
+                        class="w-full bg-slate-800/50 border border-slate-700/60 rounded-lg px-2.5 py-1.5 text-xs text-slate-400 cursor-not-allowed"
+                        title="Real-CUGAN architecture requires fixed 18px reflection padding to avoid boundary edge artifacts."
                       >
-                        <option value="reflect">{t("controls.cuganPadding.reflect")}</option>
-                        <option value="replicate">{t("controls.cuganPadding.replicate")}</option>
-                        <option value="zero">{t("controls.cuganPadding.zero")}</option>
+                        <option value="reflect">{t("controls.cuganPadding.reflect")} (Fixed)</option>
                       </select>
+                      <p class="text-[10px] text-slate-500 leading-tight">Fixed 18px reflection padding is enforced by the CUGAN adapter to eliminate edge seams.</p>
                     </div>
                   </Show>
 
@@ -725,25 +742,6 @@ export const App: Component = () => {
                         <span class="text-slate-300">Self-Attention Window</span>
                         <span class="text-sky-400 font-mono font-semibold">16 × 16 px</span>
                       </div>
-                    </div>
-                  </Show>
-
-                  {/* Real-ESRGAN Degradation Slider */}
-                  <Show when={selectedModelId().includes("realesrgan")}>
-                    <div class="space-y-1">
-                      <div class="flex items-center justify-between text-[11px] font-medium text-slate-400">
-                        <span>{t("controls.esrganDenoiseTitle")}</span>
-                        <span class="font-mono text-sky-400">{Math.round(esrganDenoise() * 100)}%</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.05"
-                        value={esrganDenoise()}
-                        onInput={(e) => setEsrganDenoise(Number(e.currentTarget.value))}
-                        class="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-sky-400"
-                      />
                     </div>
                   </Show>
                 </div>
@@ -796,20 +794,32 @@ export const App: Component = () => {
                   </div>
 
                   <div class="space-y-1">
-                    <label class="text-[11px] font-medium text-slate-400">{t("controls.precision")}</label>
+                    <div class="flex items-center justify-between">
+                      <label class="text-[11px] font-medium text-slate-400">{t("controls.precision")}</label>
+                      <Show when={!runtimeStatus()?.engine.supportsFp16}>
+                        <span class="text-[10px] text-slate-500 bg-slate-800/60 px-1.5 py-0.5 rounded border border-slate-700/60">FP16 unavailable</span>
+                      </Show>
+                    </div>
                     <div class="grid grid-cols-2 gap-2">
-                      {(["fp32", "fp16"] as const).map((prec) => (
-                        <button
-                          onClick={() => setSelectedPrecision(prec)}
-                          class={`py-1 text-xs font-semibold rounded-lg border transition ${
-                            selectedPrecision() === prec
-                              ? "bg-sky-500 text-slate-950 border-sky-400"
-                              : "bg-slate-800 text-slate-300 border-slate-700 hover:border-slate-600"
-                          }`}
-                        >
-                          {prec.toUpperCase()}
-                        </button>
-                      ))}
+                      {(["fp32", "fp16"] as const).map((prec) => {
+                        const isUnsupported = prec === "fp16" && !runtimeStatus()?.engine.supportsFp16;
+                        return (
+                          <button
+                            disabled={isUnsupported}
+                            onClick={() => !isUnsupported && setSelectedPrecision(prec)}
+                            title={isUnsupported ? "Current inference engine does not support FP16 acceleration" : undefined}
+                            class={`py-1 text-xs font-semibold rounded-lg border transition ${
+                              isUnsupported
+                                ? "bg-slate-900/50 text-slate-600 border-slate-800 cursor-not-allowed"
+                                : selectedPrecision() === prec
+                                ? "bg-sky-500 text-slate-950 border-sky-400"
+                                : "bg-slate-800 text-slate-300 border-slate-700 hover:border-slate-600"
+                            }`}
+                          >
+                            {prec.toUpperCase()}{isUnsupported ? " (N/A)" : ""}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -930,14 +940,21 @@ export const App: Component = () => {
 
                   {/* WebP Lossless Toggle */}
                   <Show when={outputFormat() === "webp"}>
-                    <div class="flex items-center justify-between pt-1">
-                      <span class="text-[11px] text-slate-400 font-medium">{t("controls.losslessWebp")}</span>
-                      <input
-                        type="checkbox"
-                        checked={webpLossless()}
-                        onChange={(e) => setWebpLossless(e.currentTarget.checked)}
-                        class="w-3.5 h-3.5 rounded accent-sky-500"
-                      />
+                    <div class="space-y-1 pt-1">
+                      <div class="flex items-center justify-between">
+                        <span class="text-[11px] text-slate-400 font-medium">{t("controls.losslessWebp")}</span>
+                        <div class="flex items-center space-x-1.5">
+                          <span class="text-[10px] text-sky-400 bg-sky-950/60 px-1.5 py-0.5 rounded border border-sky-800/60">Lossless only</span>
+                          <input
+                            type="checkbox"
+                            checked={true}
+                            disabled
+                            class="w-3.5 h-3.5 rounded accent-sky-500 cursor-not-allowed opacity-80"
+                            title="Pure-Rust WebP encoder supports lossless mode only"
+                          />
+                        </div>
+                      </div>
+                      <p class="text-[10px] text-slate-500 leading-tight">Pure-Rust encoder supports lossless WebP only. Lossy encoding is disabled.</p>
                     </div>
                   </Show>
 
@@ -1077,6 +1094,7 @@ export const App: Component = () => {
       <SettingsModal
         isOpen={isSettingsOpen()}
         settings={settings()}
+        runtimeStatus={runtimeStatus()}
         onClose={() => setIsSettingsOpen(false)}
         onSave={handleSaveSettingsModal}
       />

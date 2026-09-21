@@ -8,7 +8,7 @@ use crate::pipeline::atomic::{
 use crate::pipeline::io::{load_image_with_alpha, OutputFormat};
 use crate::pipeline::naming::strip_verbatim_prefix;
 use crate::pipeline::resample::{downsample_lanczos3, resample_rgb_lanczos3};
-use crate::pipeline::tiling::{TileBlender, TilePlan};
+use crate::pipeline::tiling::{BlendMode, TileBlender, TilePlan};
 use image::RgbImage;
 use resvera_models::{InstallerError, ModelInstaller, ModelManifest, ResolvedModel};
 use resvera_persistence::{AppDatabase, DatabaseError, JobRecord};
@@ -50,6 +50,9 @@ pub struct UpscaleJobRequest {
     pub output_format: OutputFormat,
     pub overwrite: bool,
     pub tile_size: Option<u32>,
+    pub tile_overlap: Option<u32>,
+    pub blend_mode: Option<String>,
+    pub naming_template: Option<String>,
     pub provider_preference: Option<String>,
 }
 
@@ -70,7 +73,16 @@ pub struct BatchJobDefaults {
     pub output_format: OutputFormat,
     pub overwrite: bool,
     pub tile_size: Option<u32>,
+    pub tile_overlap: Option<u32>,
+    pub blend_mode: Option<String>,
+    pub naming_template: Option<String>,
     pub provider_preference: Option<String>,
+}
+
+struct RequestTilingOptions<'a> {
+    tile_size: Option<u32>,
+    tile_overlap: Option<u32>,
+    blend_mode: Option<&'a str>,
 }
 
 #[derive(Clone)]
@@ -148,7 +160,11 @@ impl JobOrchestrator {
             &req.model_id,
             &req.model_variant_id,
             req.target_scale,
-            req.tile_size,
+            RequestTilingOptions {
+                tile_size: req.tile_size,
+                tile_overlap: req.tile_overlap,
+                blend_mode: req.blend_mode.as_deref(),
+            },
             &provider,
         )?;
 
@@ -178,6 +194,9 @@ impl JobOrchestrator {
             output_format_json: format_json,
             overwrite: req.overwrite,
             tile_size: req.tile_size,
+            tile_overlap: req.tile_overlap,
+            blend_mode: req.blend_mode.clone(),
+            naming_template: req.naming_template.clone(),
             created_at: now.clone(),
             updated_at: now,
         };
@@ -206,7 +225,11 @@ impl JobOrchestrator {
             &req.defaults.model_id,
             &req.defaults.model_variant_id,
             req.defaults.target_scale,
-            req.defaults.tile_size,
+            RequestTilingOptions {
+                tile_size: req.defaults.tile_size,
+                tile_overlap: req.defaults.tile_overlap,
+                blend_mode: req.defaults.blend_mode.as_deref(),
+            },
             &provider,
         )?;
         let mut records = Vec::with_capacity(req.inputs.len());
@@ -241,6 +264,9 @@ impl JobOrchestrator {
                 output_format_json: format_json.clone(),
                 overwrite: req.defaults.overwrite,
                 tile_size: req.defaults.tile_size,
+                tile_overlap: req.defaults.tile_overlap,
+                blend_mode: req.defaults.blend_mode.clone(),
+                naming_template: req.defaults.naming_template.clone(),
                 created_at: now.clone(),
                 updated_at: now.clone(),
             });
@@ -255,14 +281,22 @@ impl JobOrchestrator {
         model_id: &str,
         variant_id: &str,
         target_scale: u32,
-        tile_size: Option<u32>,
+        tiling: RequestTilingOptions<'_>,
         provider: &str,
     ) -> Result<ResolvedModel, OrchestratorError> {
         let root = self.models_root();
         let resolved = ModelInstaller::new(&root).resolve_active_variant(model_id, variant_id)?;
         let adapter = adapter_for_manifest(&resolved.manifest, resolved.variant.native_scale)?;
         adapter.validate_manifest(&resolved.manifest)?;
-        validated_tile_size(tile_size, adapter.tile_constraints(&resolved.manifest))?;
+        let constraints = adapter.tile_constraints(&resolved.manifest);
+        let valid_tile_size = validated_tile_size(tiling.tile_size, constraints)?;
+        validated_tile_overlap(tiling.tile_overlap, valid_tile_size, constraints)?;
+
+        if let Some(mode_str) = tiling.blend_mode {
+            mode_str
+                .parse::<BlendMode>()
+                .map_err(|e| OrchestratorError::Validation(e.to_string()))?;
+        }
 
         if target_scale == 0 || target_scale > resolved.variant.native_scale {
             return Err(OrchestratorError::Validation(format!(
@@ -353,6 +387,9 @@ impl JobOrchestrator {
             output_format,
             overwrite: original.overwrite,
             tile_size: original.tile_size,
+            tile_overlap: original.tile_overlap,
+            blend_mode: original.blend_mode,
+            naming_template: original.naming_template,
             provider_preference: original.provider_id,
         };
 
@@ -428,8 +465,8 @@ impl JobOrchestrator {
         adapter.validate_manifest(&resolved.manifest)?;
         let constraints = adapter.tile_constraints(&resolved.manifest);
         let tile_size = validated_tile_size(job.tile_size, constraints)?;
-        let overlap = constraints.overlap;
-        let plan = TilePlan::build(width, height, tile_size, overlap);
+        let tile_overlap = validated_tile_overlap(job.tile_overlap, tile_size, constraints)?;
+        let plan = TilePlan::build(width, height, tile_size, tile_overlap);
         let total_tiles = plan.tiles.len();
         if total_tiles == 0 {
             return Err(OrchestratorError::Validation(
@@ -447,7 +484,14 @@ impl JobOrchestrator {
             return Err(OrchestratorError::Cancelled);
         }
         let native_scale = resolved.variant.native_scale;
-        let mut blender = TileBlender::try_new(width, height, native_scale)?;
+        let blend_mode = match job.blend_mode.as_deref() {
+            Some(s) => s
+                .parse::<BlendMode>()
+                .map_err(|e| OrchestratorError::Validation(e.to_string()))?,
+            None => BlendMode::Cosine,
+        };
+        let mut blender =
+            TileBlender::try_new_with_blend_mode(width, height, native_scale, blend_mode)?;
 
         for (idx, tile_rect) in plan.tiles.iter().enumerate() {
             cancel.check()?;
@@ -559,6 +603,7 @@ impl JobOrchestrator {
             job.target_scale,
             &output_format,
             job.overwrite,
+            job.naming_template.as_deref(),
         );
 
         // Atomic file write with alpha channel
@@ -773,4 +818,24 @@ fn validated_tile_size(
         )));
     }
     Ok(tile_size)
+}
+
+fn validated_tile_overlap(
+    requested: Option<u32>,
+    tile_size: u32,
+    constraints: TileConstraints,
+) -> Result<u32, OrchestratorError> {
+    let overlap = requested.unwrap_or(constraints.overlap);
+    if overlap < constraints.overlap {
+        return Err(OrchestratorError::Validation(format!(
+            "Tile overlap {overlap} is less than model minimum overlap requirement {}",
+            constraints.overlap
+        )));
+    }
+    if overlap >= tile_size {
+        return Err(OrchestratorError::Validation(format!(
+            "Tile overlap {overlap} must be strictly less than tile size {tile_size}"
+        )));
+    }
+    Ok(overlap)
 }

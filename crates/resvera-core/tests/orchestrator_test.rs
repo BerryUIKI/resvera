@@ -43,6 +43,9 @@ fn test_single_job_orchestration() {
         output_format: OutputFormat::Png,
         overwrite: false,
         tile_size: Some(32),
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
         provider_preference: Some("cpu".to_string()),
     };
 
@@ -97,6 +100,9 @@ fn test_batch_jobs_and_pause_resume() {
             output_format: OutputFormat::Png,
             overwrite: false,
             tile_size: Some(32),
+            tile_overlap: None,
+            blend_mode: None,
+            naming_template: None,
             provider_preference: Some("cpu".to_string()),
         },
     };
@@ -158,6 +164,9 @@ fn test_100_job_stress_batch() {
             output_format: OutputFormat::Png,
             overwrite: true,
             tile_size: Some(32),
+            tile_overlap: None,
+            blend_mode: None,
+            naming_template: None,
             provider_preference: Some("cpu".to_string()),
         },
     };
@@ -197,6 +206,9 @@ fn test_submission_rejects_incompatible_model_options() {
         output_format: OutputFormat::Png,
         overwrite: false,
         tile_size: Some(32),
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
         provider_preference: None,
     };
 
@@ -296,6 +308,9 @@ fn test_cancellation_during_finalization_cleans_artifacts() {
         output_format: OutputFormat::Png,
         overwrite: true,
         tile_size: Some(32),
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
         provider_preference: Some("cpu".to_string()),
     };
 
@@ -349,6 +364,9 @@ fn test_database_cancellation_race_during_finalizing_commits() {
         output_format: OutputFormat::Png,
         overwrite: true,
         tile_size: Some(32),
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
         provider_preference: Some("cpu".to_string()),
     };
 
@@ -413,6 +431,9 @@ fn test_preflight_input_validation() {
         output_format: OutputFormat::Png,
         overwrite: false,
         tile_size: Some(32),
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
         provider_preference: Some("cpu".to_string()),
     };
     assert!(orchestrator.submit_job(&req_nonexistent).is_err());
@@ -490,12 +511,21 @@ fn test_queue_action_semantics_cancellation_and_retry() {
         output_format: OutputFormat::Png,
         overwrite: false,
         tile_size: Some(32),
+        tile_overlap: Some(16),
+        blend_mode: Some("linear".to_string()),
+        naming_template: Some("custom_{model}_{stem}".to_string()),
         provider_preference: Some("cpu".to_string()),
     };
 
     // 1. Submit initial job
     let job1 = orchestrator.submit_job(&req).unwrap();
     assert_eq!(job1.state, "queued");
+    assert_eq!(job1.tile_overlap, Some(16));
+    assert_eq!(job1.blend_mode.as_deref(), Some("linear"));
+    assert_eq!(
+        job1.naming_template.as_deref(),
+        Some("custom_{model}_{stem}")
+    );
 
     // 2. Prevent duplicate submission of active jobs for same input
     let dup_err = orchestrator.submit_job(&req).unwrap_err();
@@ -519,6 +549,9 @@ fn test_queue_action_semantics_cancellation_and_retry() {
     assert_eq!(retried.model_variant_id, job1.model_variant_id);
     assert_eq!(retried.target_scale, job1.target_scale);
     assert_eq!(retried.tile_size, job1.tile_size);
+    assert_eq!(retried.tile_overlap, job1.tile_overlap);
+    assert_eq!(retried.blend_mode, job1.blend_mode);
+    assert_eq!(retried.naming_template, job1.naming_template);
     assert_eq!(retried.output_format_json, job1.output_format_json);
     assert_eq!(retried.provider_id, job1.provider_id);
 
@@ -534,4 +567,77 @@ fn test_queue_action_semantics_cancellation_and_retry() {
     // 8. Retrying cancelled job succeeds and re-enqueues
     let retried_after_cancel = orchestrator.retry_job(&retried.id).unwrap();
     assert_eq!(retried_after_cancel.state, "queued");
+    assert_eq!(retried_after_cancel.tile_overlap, Some(16));
+    assert_eq!(retried_after_cancel.blend_mode.as_deref(), Some("linear"));
+    assert_eq!(
+        retried_after_cancel.naming_template.as_deref(),
+        Some("custom_{model}_{stem}")
+    );
+}
+
+#[test]
+fn test_advanced_processing_controls_validation() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(MockEngine);
+    let models_root = temp.path().join("models");
+    install_mock_model(&models_root, "realesrgan-x4plus", 4);
+    let orchestrator =
+        JobOrchestrator::with_models_root(db, engine, temp.path().join("previews"), &models_root);
+
+    let input_path = temp.path().join("valid_input.png");
+    create_test_image(&input_path, 16, 16);
+
+    let base = UpscaleJobRequest {
+        input_path: input_path.to_str().unwrap().to_string(),
+        output_directory: temp.path().to_str().unwrap().to_string(),
+        model_id: "realesrgan-x4plus".to_string(),
+        model_variant_id: "default".to_string(),
+        target_scale: 4,
+        output_format: OutputFormat::Png,
+        overwrite: true,
+        tile_size: Some(64),
+        tile_overlap: Some(16),
+        blend_mode: Some("cosine".to_string()),
+        naming_template: None,
+        provider_preference: Some("cpu".to_string()),
+    };
+
+    // 1. Valid request succeeds
+    assert!(orchestrator.submit_job(&base).is_ok());
+
+    // 2. Tile overlap >= tile_size is rejected
+    let mut invalid_overlap = base.clone();
+    invalid_overlap.input_path = temp
+        .path()
+        .join("overlap_invalid.png")
+        .to_str()
+        .unwrap()
+        .to_string();
+    create_test_image(&temp.path().join("overlap_invalid.png"), 16, 16);
+    invalid_overlap.tile_overlap = Some(64); // equal to tile_size 64
+    let err_overlap = orchestrator.submit_job(&invalid_overlap).unwrap_err();
+    assert!(err_overlap
+        .to_string()
+        .contains("strictly less than tile size"));
+
+    // 3. Tile overlap less than model constraint is rejected (RRDB requires >= 8)
+    invalid_overlap.tile_overlap = Some(4);
+    let err_min_overlap = orchestrator.submit_job(&invalid_overlap).unwrap_err();
+    assert!(err_min_overlap
+        .to_string()
+        .contains("minimum overlap requirement"));
+
+    // 4. Invalid blend mode string is rejected
+    let mut invalid_blend = base;
+    invalid_blend.input_path = temp
+        .path()
+        .join("blend_invalid.png")
+        .to_str()
+        .unwrap()
+        .to_string();
+    create_test_image(&temp.path().join("blend_invalid.png"), 16, 16);
+    invalid_blend.blend_mode = Some("unknown_blend_mode".to_string());
+    let err_blend = orchestrator.submit_job(&invalid_blend).unwrap_err();
+    assert!(err_blend.to_string().contains("Unsupported blend mode"));
 }
