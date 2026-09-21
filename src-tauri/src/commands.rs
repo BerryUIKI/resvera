@@ -7,6 +7,7 @@ use resvera_models::ModelInstaller;
 use resvera_persistence::JobRecord;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -1331,8 +1332,16 @@ pub fn is_window_maximized(window: tauri::Window) -> Result<bool, ApiError> {
     })
 }
 
+pub fn shutdown_application_impl(state: &AppState, timeout: Duration) -> bool {
+    state.orchestrator.shutdown(timeout).unwrap_or(false)
+}
+
 #[tauri::command]
-pub fn close_window(window: tauri::Window) -> Result<(), ApiError> {
+pub fn close_window(
+    state: tauri::State<'_, AppState>,
+    window: tauri::Window,
+) -> Result<(), ApiError> {
+    shutdown_application_impl(&state, Duration::from_secs(3));
     window.close().map_err(|e| ApiError {
         code: ErrorCode::Internal,
         message: format!("Failed to close window: {e}"),

@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -345,6 +346,41 @@ impl JobOrchestrator {
             )));
         }
         Ok(())
+    }
+
+    pub fn cancel_all_active(&self) {
+        let tokens: Vec<CancellationToken> = self
+            .active_cancel_tokens
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect();
+        for token in tokens {
+            token.cancel();
+        }
+    }
+
+    pub fn shutdown(&self, timeout: Duration) -> Result<bool, OrchestratorError> {
+        self.pause_queue();
+        self.cancel_all_active();
+
+        let start = Instant::now();
+        let mut clean = false;
+
+        while start.elapsed() < timeout {
+            if self.active_job_id.lock().unwrap().is_none() {
+                clean = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(15));
+        }
+
+        // Persist any remaining in-flight non-terminal states ('preparing', 'running', 'finalizing')
+        // to 'interrupted' so the database is always left in a recoverable, consistent state.
+        self.db.run_crash_recovery_sweep()?;
+
+        Ok(clean)
     }
 
     pub fn retry_job(&self, job_id: &str) -> Result<JobRecord, OrchestratorError> {

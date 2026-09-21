@@ -106,6 +106,13 @@ fn main() {
             close_window,
             read_image_data,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if let Some(state) = window.try_state::<AppState>() {
+                    shutdown_application_impl(&state, std::time::Duration::from_secs(3));
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running Resvera desktop application");
 }
