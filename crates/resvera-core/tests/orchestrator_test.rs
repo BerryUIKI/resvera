@@ -463,3 +463,75 @@ fn test_preflight_input_validation() {
         .to_string()
         .contains("Target scale 8x is unsupported by variant 'default' (native 4x)"));
 }
+
+#[test]
+fn test_queue_action_semantics_cancellation_and_retry() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(MockEngine);
+    let models_root = temp.path().join("models");
+    install_mock_model(&models_root, "realesrgan-x4plus", 4);
+    let orchestrator = JobOrchestrator::with_models_root(
+        db.clone(),
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    );
+
+    let input_path = temp.path().join("retry_test.png");
+    create_test_image(&input_path, 16, 16);
+
+    let req = UpscaleJobRequest {
+        input_path: input_path.to_str().unwrap().to_string(),
+        output_directory: temp.path().to_str().unwrap().to_string(),
+        model_id: "realesrgan-x4plus".to_string(),
+        model_variant_id: "default".to_string(),
+        target_scale: 4,
+        output_format: OutputFormat::Png,
+        overwrite: false,
+        tile_size: Some(32),
+        provider_preference: Some("cpu".to_string()),
+    };
+
+    // 1. Submit initial job
+    let job1 = orchestrator.submit_job(&req).unwrap();
+    assert_eq!(job1.state, "queued");
+
+    // 2. Prevent duplicate submission of active jobs for same input
+    let dup_err = orchestrator.submit_job(&req).unwrap_err();
+    assert!(dup_err.to_string().contains("already queued or processing"));
+
+    // 3. Cannot retry an active job
+    let retry_active_err = orchestrator.retry_job(&job1.id).unwrap_err();
+    assert!(retry_active_err.to_string().contains("Cannot retry job"));
+
+    // 4. Process job to completion (succeeded)
+    let completed = orchestrator.process_next_job().unwrap().unwrap();
+    assert_eq!(completed.id, job1.id);
+    assert_eq!(completed.state, "succeeded");
+
+    // 5. Retry succeeded job: clones original immutable parameters faithfully
+    let retried = orchestrator.retry_job(&job1.id).unwrap();
+    assert_ne!(retried.id, job1.id);
+    assert_eq!(retried.state, "queued");
+    assert_eq!(retried.input_path, job1.input_path);
+    assert_eq!(retried.model_id, job1.model_id);
+    assert_eq!(retried.model_variant_id, job1.model_variant_id);
+    assert_eq!(retried.target_scale, job1.target_scale);
+    assert_eq!(retried.tile_size, job1.tile_size);
+    assert_eq!(retried.output_format_json, job1.output_format_json);
+    assert_eq!(retried.provider_id, job1.provider_id);
+
+    // 6. Cannot duplicate or retry while retried job is active
+    let retry_again_err = orchestrator.retry_job(&job1.id).unwrap_err();
+    assert!(retry_again_err.to_string().contains("already processing"));
+
+    // 7. Cancel retried job from queued state
+    assert!(orchestrator.cancel_job(&retried.id).is_ok());
+    let cancelled_rec = db.get_job(&retried.id).unwrap().unwrap();
+    assert_eq!(cancelled_rec.state, "cancelled");
+
+    // 8. Retrying cancelled job succeeds and re-enqueues
+    let retried_after_cancel = orchestrator.retry_job(&retried.id).unwrap();
+    assert_eq!(retried_after_cancel.state, "queued");
+}

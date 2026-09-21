@@ -136,6 +136,12 @@ impl JobOrchestrator {
     }
 
     pub fn submit_job(&self, req: &UpscaleJobRequest) -> Result<JobRecord, OrchestratorError> {
+        if self.db.has_active_job_for_input(&req.input_path)? {
+            return Err(OrchestratorError::Validation(format!(
+                "An active job is already queued or processing for '{}'",
+                req.input_path
+            )));
+        }
         validate_and_preflight_input_image(&req.input_path, req.target_scale)?;
         let provider = normalize_provider(req.provider_preference.as_deref())?;
         let resolved = self.resolve_request_model(
@@ -186,6 +192,15 @@ impl JobOrchestrator {
                 "Batch must contain at least one input".into(),
             ));
         }
+
+        for input in &req.inputs {
+            if self.db.has_active_job_for_input(input)? {
+                return Err(OrchestratorError::Validation(format!(
+                    "An active job is already queued or processing for '{input}'"
+                )));
+            }
+        }
+
         let provider = normalize_provider(req.defaults.provider_preference.as_deref())?;
         let resolved = self.resolve_request_model(
             &req.defaults.model_id,
@@ -296,6 +311,52 @@ impl JobOrchestrator {
             )));
         }
         Ok(())
+    }
+
+    pub fn retry_job(&self, job_id: &str) -> Result<JobRecord, OrchestratorError> {
+        let original = self
+            .db
+            .get_job(job_id)?
+            .ok_or_else(|| OrchestratorError::JobNotFound(job_id.to_string()))?;
+
+        match original.state.as_str() {
+            "succeeded" | "failed" | "cancelled" | "interrupted" => {}
+            active => {
+                return Err(OrchestratorError::Validation(format!(
+                    "Cannot retry job '{job_id}' in active state '{active}'"
+                )));
+            }
+        }
+
+        if self.db.has_active_job_for_input(&original.input_path)? {
+            return Err(OrchestratorError::Validation(format!(
+                "An active job is already processing '{}'",
+                original.input_path
+            )));
+        }
+
+        let output_format = match original.output_format_json.as_deref() {
+            Some(json) => serde_json::from_str::<OutputFormat>(json).map_err(|e| {
+                OrchestratorError::Validation(format!("Invalid stored output format: {e}"))
+            })?,
+            None => OutputFormat::Png,
+        };
+
+        let output_directory = original.output_directory.unwrap_or_default();
+
+        let req = UpscaleJobRequest {
+            input_path: original.input_path,
+            output_directory,
+            model_id: original.model_id,
+            model_variant_id: original.model_variant_id,
+            target_scale: original.target_scale,
+            output_format,
+            overwrite: original.overwrite,
+            tile_size: original.tile_size,
+            provider_preference: original.provider_id,
+        };
+
+        self.submit_job(&req)
     }
 
     /// Fetches the next queued job and processes it synchronously.

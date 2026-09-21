@@ -90,6 +90,7 @@ fn main() {
             create_upscale_job,
             create_batch_jobs,
             cancel_job,
+            retry_job,
             pause_queue,
             resume_queue,
             get_queue,

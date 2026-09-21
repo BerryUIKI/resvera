@@ -228,6 +228,13 @@ export async function cancelJob(jobId: string): Promise<JobSnapshot | null> {
   return null;
 }
 
+export async function retryJob(jobId: string): Promise<JobSnapshot | null> {
+  if (isTauri()) {
+    return await invoke<JobSnapshot>("retry_job", { jobId });
+  }
+  return null;
+}
+
 export async function getJob(jobId: string): Promise<JobSnapshot | null> {
   if (isTauri()) {
     return await invoke<JobSnapshot>("get_job", { jobId });

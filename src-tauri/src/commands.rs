@@ -930,6 +930,22 @@ pub fn cancel_job(
     cancel_job_impl(&state, &job_id)
 }
 
+pub fn retry_job_impl(state: &AppState, job_id: &str) -> Result<JobSnapshot, ApiError> {
+    let record = state
+        .orchestrator
+        .retry_job(job_id)
+        .map_err(|e| map_orchestrator_error(&e))?;
+    Ok(job_record_to_snapshot(record))
+}
+
+#[tauri::command]
+pub fn retry_job(
+    state: tauri::State<'_, AppState>,
+    job_id: String,
+) -> Result<JobSnapshot, ApiError> {
+    retry_job_impl(&state, &job_id)
+}
+
 pub fn pause_queue_impl(state: &AppState) -> QueueSnapshot {
     state.orchestrator.pause_queue();
     get_queue_impl(state)
