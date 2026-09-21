@@ -113,9 +113,27 @@ export const Header: Component<HeaderProps> = (props) => {
           <span>{t("header.modelCenter")}</span>
         </button>
 
-        <div class="flex items-center space-x-2 bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/60 text-xs">
-          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span class="text-emerald-300 font-medium">{t("app.offlineMode")}</span>
+        <div class="flex items-center space-x-2 bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/60 text-xs"
+             title={props.status?.engine.diagnostic ?? undefined}>
+          {/* Status dot: green = offline-ready, amber = engine ok but no model, red = engine error */}
+          {props.status === null || props.status === undefined ? (
+            <span class="w-2 h-2 rounded-full bg-slate-500 animate-pulse" />
+          ) : props.status.engine.healthy && props.status.offlineReady ? (
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          ) : props.status.engine.healthy ? (
+            <span class="w-2 h-2 rounded-full bg-amber-400" />
+          ) : (
+            <span class="w-2 h-2 rounded-full bg-red-500" />
+          )}
+          <span class={
+            props.status?.offlineReady
+              ? "text-emerald-300 font-medium"
+              : props.status?.engine.healthy
+                ? "text-amber-300 font-medium"
+                : "text-red-400 font-medium"
+          }>
+            {t("app.offlineMode")}
+          </span>
           <span class="text-slate-500">|</span>
           <span class="text-slate-300">
             {props.status

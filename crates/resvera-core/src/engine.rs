@@ -25,6 +25,10 @@ pub struct EngineId(pub String);
 #[derive(Debug, Clone)]
 pub struct EngineCapabilities {
     pub engine_id: EngineId,
+    /// Human-readable version string for the underlying inference runtime
+    /// (e.g. "1.28.0" for ONNX Runtime). Derived at runtime when available;
+    /// falls back to the linked crate version.
+    pub engine_version: String,
     pub supported_providers: Vec<String>,
     pub supports_fp16: bool,
     pub supports_dynamic_shapes: bool,
