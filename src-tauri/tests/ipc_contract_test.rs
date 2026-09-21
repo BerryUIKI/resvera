@@ -5,6 +5,7 @@ use resvera_desktop::worker::QueueWorker;
 use resvera_engine_ort::OrtEngine;
 use resvera_models::{compute_file_sha256, ModelInstaller};
 use resvera_persistence::{AppDatabase, JobRecord};
+use rusqlite::Connection;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -85,7 +86,7 @@ fn test_ipc_commands_workflow() {
     assert!(!models[1].installed); // Not installed
 
     // 3. Settings load and save
-    let default_settings = load_settings_impl(&state);
+    let default_settings = load_settings_impl(&state).unwrap();
     assert_eq!(default_settings.schema_version, 1);
 
     let mut new_settings = default_settings.clone();
@@ -1113,5 +1114,243 @@ fn test_staging_disk_leak_prevention_on_job_completion() {
     assert!(
         !staged_path2.exists(),
         "Staged image file must be deleted on job cancellation"
+    );
+}
+
+#[test]
+fn test_database_failure_returns_typed_storage_failure_ipc_error() {
+    let temp = tempdir().unwrap();
+    let db_path = temp.path().join("corrupted_queue.db");
+    let db = AppDatabase::open(&db_path).unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        temp.path().join("models"),
+    );
+
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(temp.path().join("models"))),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path: temp.path().join("settings.json"),
+        staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    // Verify healthy queue returns Ok
+    let queue = get_queue_impl(&state).unwrap();
+    assert_eq!(queue.queued_job_ids.len(), 0);
+
+    // Drop table to induce a database failure
+    let conn = Connection::open(&db_path).unwrap();
+    conn.execute_batch("DROP TABLE jobs;").unwrap();
+
+    // get_queue_impl, pause_queue_impl, resume_queue_impl must return typed StorageFailure
+    let err_get = get_queue_impl(&state).unwrap_err();
+    assert_eq!(err_get.code, ErrorCode::StorageFailure);
+    assert!(err_get.message.contains("database"));
+
+    let err_pause = pause_queue_impl(&state).unwrap_err();
+    assert_eq!(err_pause.code, ErrorCode::StorageFailure);
+
+    let err_resume = resume_queue_impl(&state).unwrap_err();
+    assert_eq!(err_resume.code, ErrorCode::StorageFailure);
+}
+
+#[test]
+fn test_load_settings_malformed_json_preserves_corrupt_file_and_errors() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        temp.path().join("models"),
+    );
+
+    let settings_path = temp.path().join("settings.json");
+    let corrupt_content = "{\"schemaVersion\": 1, \"theme\": \"dark\", MALFORMED_SYNTAX...";
+    std::fs::write(&settings_path, corrupt_content).unwrap();
+
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(temp.path().join("models"))),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path: settings_path.clone(),
+        staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    let result = load_settings_impl(&state);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(err.code, ErrorCode::StorageFailure);
+    assert!(err.message.contains("Malformed settings JSON"));
+
+    // Check that diagnostic backup file was created
+    let mut backup_found = false;
+    for entry in std::fs::read_dir(temp.path()).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy();
+        if name.starts_with("settings.json.corrupt.") {
+            backup_found = true;
+            let preserved_bytes = std::fs::read_to_string(&path).unwrap();
+            assert_eq!(preserved_bytes, corrupt_content);
+        }
+    }
+    assert!(
+        backup_found,
+        "Corrupt settings file must be preserved for diagnosis"
+    );
+}
+
+#[test]
+fn test_load_settings_incompatible_schema_version_preserves_file_and_errors() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        temp.path().join("models"),
+    );
+
+    let settings_path = temp.path().join("settings.json");
+    let future_content = "{\"schemaVersion\": 999, \"theme\": \"dark\", \"futureOption\": true}";
+    std::fs::write(&settings_path, future_content).unwrap();
+
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(temp.path().join("models"))),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path: settings_path.clone(),
+        staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    let result = load_settings_impl(&state);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+    assert!(err
+        .message
+        .contains("Unsupported settings schema version 999"));
+
+    // Ensure the original file was NOT overwritten
+    let current_disk = std::fs::read_to_string(&settings_path).unwrap();
+    assert_eq!(current_disk, future_content);
+
+    // Check that diagnostic backup was created
+    let mut backup_found = false;
+    for entry in std::fs::read_dir(temp.path()).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy();
+        if name.starts_with("settings.json.incompatible.") {
+            backup_found = true;
+            let preserved_bytes = std::fs::read_to_string(&path).unwrap();
+            assert_eq!(preserved_bytes, future_content);
+        }
+    }
+    assert!(backup_found, "Incompatible settings file must be preserved");
+}
+
+#[test]
+fn test_load_settings_v0_migration_success() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        temp.path().join("models"),
+    );
+
+    let settings_path = temp.path().join("settings.json");
+    // Legacy v0 settings: missing schemaVersion, snake_case key, legacy metadataPolicy 'strip'
+    let v0_content = r#"{
+        "output_directory": "/custom/export/dir",
+        "metadata_policy": "strip",
+        "theme": "light",
+        "locale": "en-US"
+    }"#;
+    std::fs::write(&settings_path, v0_content).unwrap();
+
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(temp.path().join("models"))),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path: settings_path.clone(),
+        staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    let loaded = load_settings_impl(&state).unwrap();
+    assert_eq!(loaded.schema_version, 1);
+    assert_eq!(
+        loaded.output_directory.as_deref(),
+        Some("/custom/export/dir")
+    );
+    assert_eq!(loaded.metadata_policy, "stripAll"); // Migrated from 'strip'!
+    assert_eq!(loaded.theme, "light");
+    assert_eq!(loaded.locale, "en-US");
+
+    // Verify migrated settings file committed to disk has schema_version 1
+    let disk_content = std::fs::read_to_string(&settings_path).unwrap();
+    let re_read: AppSettings = serde_json::from_str(&disk_content).unwrap();
+    assert_eq!(re_read.schema_version, 1);
+    assert_eq!(re_read.metadata_policy, "stripAll");
+}
+
+#[test]
+fn test_save_settings_fails_on_uncreatable_models_dir() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        temp.path().join("models"),
+    );
+
+    // Create a regular file blocking directory creation
+    let blocker_file = temp.path().join("blocker_file");
+    std::fs::write(&blocker_file, b"content").unwrap();
+    let uncreatable_dir = blocker_file.join("sub_dir_models");
+
+    let initial = AppSettings::default();
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(temp.path().join("models"))),
+        settings: Arc::new(Mutex::new(initial.clone())),
+        settings_path: temp.path().join("settings.json"),
+        staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    let mut invalid_settings = initial.clone();
+    invalid_settings.models_directory = Some(uncreatable_dir.to_str().unwrap().to_string());
+
+    let result = save_settings_impl(&state, invalid_settings);
+    assert!(
+        result.is_err(),
+        "Saving settings with uncreatable models dir must fail"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.code == ErrorCode::StorageFailure || err.code == ErrorCode::PermissionDenied,
+        "Expected StorageFailure or PermissionDenied, got {:?}",
+        err.code
+    );
+
+    // In-memory settings must remain unchanged
+    assert_eq!(
+        state.settings.lock().unwrap().models_directory,
+        initial.models_directory
     );
 }

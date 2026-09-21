@@ -14,7 +14,13 @@ pub enum DatabaseError {
     Constraint(String),
     #[error("Invalid cursor: {0}")]
     InvalidCursor(String),
+    #[error("Incompatible schema version: found {found}, supported {supported}")]
+    IncompatibleSchemaVersion { found: u32, supported: u32 },
+    #[error("Corrupt database: {0}")]
+    CorruptDatabase(String),
 }
+
+pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobRecord {
@@ -44,7 +50,7 @@ pub struct JobRecord {
     pub updated_at: String,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct AppDatabase {
     conn: Arc<Mutex<Connection>>,
 }
@@ -61,6 +67,25 @@ impl AppDatabase {
 
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, DatabaseError> {
         let conn = Connection::open(path)?;
+
+        // Run integrity check on open to detect file corruption early
+        let check_result: Result<String, rusqlite::Error> =
+            conn.pragma_query_value(None, "quick_check", |row| row.get(0));
+        match check_result {
+            Ok(ref status) if status == "ok" => {}
+            Ok(status) => return Err(DatabaseError::CorruptDatabase(status)),
+            Err(e) => return Err(DatabaseError::CorruptDatabase(e.to_string())),
+        }
+
+        // Schema version check: reject future/incompatible schema versions
+        let user_version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if user_version > CURRENT_SCHEMA_VERSION {
+            return Err(DatabaseError::IncompatibleSchemaVersion {
+                found: user_version,
+                supported: CURRENT_SCHEMA_VERSION,
+            });
+        }
+
         // Enable WAL mode and standard busy timeouts
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
@@ -118,6 +143,7 @@ impl AppDatabase {
             ",
         )?;
         migrate_job_columns(&conn)?;
+        conn.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)?;
         Ok(())
     }
 
