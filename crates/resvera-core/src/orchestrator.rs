@@ -136,7 +136,7 @@ impl JobOrchestrator {
     }
 
     pub fn submit_job(&self, req: &UpscaleJobRequest) -> Result<JobRecord, OrchestratorError> {
-        validate_input_file(&req.input_path)?;
+        validate_and_preflight_input_image(&req.input_path, req.target_scale)?;
         let provider = normalize_provider(req.provider_preference.as_deref())?;
         let resolved = self.resolve_request_model(
             &req.model_id,
@@ -203,7 +203,7 @@ impl JobOrchestrator {
         )?);
 
         for input in &req.inputs {
-            validate_input_file(input)?;
+            validate_and_preflight_input_image(input, req.defaults.target_scale)?;
 
             let id = format!("job-{}", uuid::Uuid::new_v4());
             records.push(JobRecord {
@@ -585,13 +585,88 @@ fn default_models_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".resvera").join("models"))
 }
 
-fn validate_input_file(input: &str) -> Result<(), OrchestratorError> {
+const MAX_INPUT_DIMENSION: u32 = 16_384;
+const MAX_INPUT_PIXELS: u64 = 67_108_864; // 64 Megapixels
+const MAX_OUTPUT_PIXELS: u64 = 268_435_456; // 256 Megapixels
+
+fn validate_and_preflight_input_image(
+    input: &str,
+    target_scale: u32,
+) -> Result<(), OrchestratorError> {
     let path = Path::new(input);
     if input.trim().is_empty() || !path.is_file() {
         return Err(OrchestratorError::Validation(format!(
             "Input file not found or is not a regular file: {input}"
         )));
     }
+
+    // Inspect magic bytes and header without decoding image payload
+    let reader = image::ImageReader::open(path)
+        .map_err(OrchestratorError::Io)?
+        .with_guessed_format()
+        .map_err(|e| {
+            OrchestratorError::Validation(format!("Cannot determine image format for {input}: {e}"))
+        })?;
+
+    let format = reader.format().ok_or_else(|| {
+        OrchestratorError::Validation(format!(
+            "Unsupported or unrecognized image format for '{input}'. Only PNG, JPEG, and WebP are supported"
+        ))
+    })?;
+
+    match format {
+        image::ImageFormat::Png | image::ImageFormat::Jpeg | image::ImageFormat::WebP => {}
+        other => {
+            return Err(OrchestratorError::Validation(format!(
+                "Image format {other:?} is not supported for '{input}'. Only PNG, JPEG, and WebP are supported"
+            )));
+        }
+    }
+
+    let (width, height) = reader.into_dimensions().map_err(|e| {
+        OrchestratorError::Validation(format!(
+            "Failed to read image dimensions from '{input}': {e}. File may be corrupted or not a valid image"
+        ))
+    })?;
+
+    if width == 0 || height == 0 {
+        return Err(OrchestratorError::Validation(format!(
+            "Image '{input}' has invalid zero dimensions: {width}x{height}"
+        )));
+    }
+
+    if width > MAX_INPUT_DIMENSION || height > MAX_INPUT_DIMENSION {
+        return Err(OrchestratorError::Validation(format!(
+            "Image '{input}' dimension ({width}x{height}) exceeds maximum limit ({MAX_INPUT_DIMENSION}px)"
+        )));
+    }
+
+    let input_pixels = (width as u64)
+        .checked_mul(height as u64)
+        .ok_or_else(|| OrchestratorError::Validation("Image pixel count overflowed".into()))?;
+
+    if input_pixels > MAX_INPUT_PIXELS {
+        return Err(OrchestratorError::Validation(format!(
+            "Image '{input}' total pixels ({input_pixels}) exceeds maximum limit ({MAX_INPUT_PIXELS}px)"
+        )));
+    }
+
+    let out_w = (width as u64)
+        .checked_mul(target_scale as u64)
+        .ok_or_else(|| OrchestratorError::Validation("Output width integer overflow".into()))?;
+    let out_h = (height as u64)
+        .checked_mul(target_scale as u64)
+        .ok_or_else(|| OrchestratorError::Validation("Output height integer overflow".into()))?;
+    let out_pixels = out_w.checked_mul(out_h).ok_or_else(|| {
+        OrchestratorError::Validation("Output pixel count integer overflow".into())
+    })?;
+
+    if out_pixels > MAX_OUTPUT_PIXELS {
+        return Err(OrchestratorError::Validation(format!(
+            "Upscaled image size ({out_w}x{out_h} = {out_pixels} pixels) exceeds maximum memory budget ({MAX_OUTPUT_PIXELS} pixels)"
+        )));
+    }
+
     Ok(())
 }
 

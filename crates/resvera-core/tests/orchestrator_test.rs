@@ -387,3 +387,79 @@ fn test_database_cancellation_race_during_finalizing_commits() {
     let final_record = db.get_job(&claimed.id).unwrap().unwrap();
     assert_eq!(final_record.state, "cancelled");
 }
+
+#[test]
+fn test_preflight_input_validation() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(MockEngine);
+    let models_root = temp.path().join("models");
+    install_mock_model(&models_root, "realesrgan-x4plus", 4);
+    let orchestrator =
+        JobOrchestrator::with_models_root(db, engine, temp.path().join("previews"), &models_root);
+
+    // 1. Non-existent file
+    let req_nonexistent = UpscaleJobRequest {
+        input_path: temp
+            .path()
+            .join("nonexistent.png")
+            .to_str()
+            .unwrap()
+            .to_string(),
+        output_directory: temp.path().to_str().unwrap().to_string(),
+        model_id: "realesrgan-x4plus".to_string(),
+        model_variant_id: "default".to_string(),
+        target_scale: 4,
+        output_format: OutputFormat::Png,
+        overwrite: false,
+        tile_size: Some(32),
+        provider_preference: Some("cpu".to_string()),
+    };
+    assert!(orchestrator.submit_job(&req_nonexistent).is_err());
+
+    // 2. Corrupt / fake image disguised as PNG (magic bytes mismatch / invalid signature)
+    let fake_png = temp.path().join("fake.png");
+    std::fs::write(&fake_png, b"This is not a real PNG image!").unwrap();
+    let req_fake = UpscaleJobRequest {
+        input_path: fake_png.to_str().unwrap().to_string(),
+        ..req_nonexistent.clone()
+    };
+    let err_fake = orchestrator.submit_job(&req_fake).unwrap_err();
+    assert!(
+        err_fake.to_string().contains("File may be corrupted")
+            || err_fake.to_string().contains("Invalid PNG signature")
+            || err_fake.to_string().contains("Unsupported or unrecognized")
+    );
+
+    // 3. Unsupported format (BMP)
+    let bmp_path = temp.path().join("test.bmp");
+    let mut bmp_bytes = vec![0u8; 54];
+    bmp_bytes[0] = b'B';
+    bmp_bytes[1] = b'M';
+    std::fs::write(&bmp_path, bmp_bytes).unwrap();
+    let req_bmp = UpscaleJobRequest {
+        input_path: bmp_path.to_str().unwrap().to_string(),
+        ..req_nonexistent.clone()
+    };
+    let err_bmp = orchestrator.submit_job(&req_bmp).unwrap_err();
+    assert!(
+        err_bmp.to_string().contains("not supported")
+            || err_bmp.to_string().contains("Only PNG, JPEG, and WebP")
+            || err_bmp
+                .to_string()
+                .contains("Cannot determine image format")
+    );
+
+    // 4. Target scale 8x requested on 4x model (scale truthfulness)
+    let valid_png = temp.path().join("valid.png");
+    create_test_image(&valid_png, 16, 16);
+    let req_scale_8 = UpscaleJobRequest {
+        input_path: valid_png.to_str().unwrap().to_string(),
+        target_scale: 8,
+        ..req_nonexistent.clone()
+    };
+    let err_scale_8 = orchestrator.submit_job(&req_scale_8).unwrap_err();
+    assert!(err_scale_8
+        .to_string()
+        .contains("Target scale 8x is unsupported by variant 'default' (native 4x)"));
+}

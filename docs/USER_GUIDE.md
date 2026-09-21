@@ -19,7 +19,7 @@ Resvera 是一款支持全平台、纯离线运行的高性能 AI 图像超分�
 
 ### 2. Adding Images to Queue / 添加图像至处理队列
 1. Drag and drop PNG, JPEG, or WebP images into the window or click **"Add Images to Queue" (添加图片至队列)**.
-2. Select your target **Scale Factor** (1x, 2x, 4x, 8x Cascade).
+2. Select your target **Scale Factor** (1x, 2x, 4x, bounded by the selected model's native resolution).
 3. Select your preferred **Output Format** (PNG, JPEG, WebP).
 4. The processing queue runs sequentially with realtime progress and cancellation support.
 

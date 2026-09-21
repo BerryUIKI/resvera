@@ -70,6 +70,12 @@ export const App: Component = () => {
   const [cuganPaddingMode, setCuganPaddingMode] = createSignal("reflect");
   const [esrganDenoise, setEsrganDenoise] = createSignal(0.5);
 
+  const selectedModel = () => models().find((m) => m.id === selectedModelId());
+  const maxModelScale = () => {
+    const m = selectedModel();
+    return m && m.nativeScales && m.nativeScales.length > 0 ? Math.max(...m.nativeScales) : 4;
+  };
+
   // Accordion Sections Fold State
   const [isHardwareOpen, setIsHardwareOpen] = createSignal(false);
   const [isTilingOpen, setIsTilingOpen] = createSignal(false);
@@ -209,7 +215,7 @@ export const App: Component = () => {
         const { getCurrentWebview } = await import("@tauri-apps/api/webview");
         unlistenDragDrop = await getCurrentWebview().onDragDropEvent(async (event) => {
           if (event.payload.type === "drop") {
-            const imageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".bmp"];
+            const imageExtensions = [".png", ".jpg", ".jpeg", ".webp"];
             const droppedPaths = event.payload.paths.filter((p) => {
               const lower = p.toLowerCase();
               return imageExtensions.some((ext) => lower.endsWith(ext));
@@ -625,19 +631,25 @@ export const App: Component = () => {
               {/* Target Scale */}
               <div class="pt-2">
                 <label class="text-[11px] font-medium text-slate-400 block mb-1.5">{t("controls.scaleFactor")}</label>
-                <div class="grid grid-cols-4 gap-1.5">
-                  {[1, 2, 4, 8].map((s) => (
-                    <button
-                      onClick={() => setTargetScale(s)}
-                      class={`py-1.5 text-xs font-semibold rounded-lg border transition ${
-                        targetScale() === s
-                          ? "bg-sky-500 text-slate-950 border-sky-400 shadow-md shadow-sky-500/20"
-                          : "bg-slate-800 text-slate-300 border-slate-700 hover:border-slate-600"
-                      }`}
-                    >
-                      {s}x
-                    </button>
-                  ))}
+                <div class="grid grid-cols-3 gap-1.5">
+                  {[1, 2, 4].map((s) => {
+                    const disabled = s > maxModelScale();
+                    return (
+                      <button
+                        disabled={disabled}
+                        onClick={() => setTargetScale(s)}
+                        class={`py-1.5 text-xs font-semibold rounded-lg border transition ${
+                          disabled
+                            ? "opacity-30 cursor-not-allowed bg-slate-900 border-slate-800 text-slate-600"
+                            : targetScale() === s
+                            ? "bg-sky-500 text-slate-950 border-sky-400 shadow-md shadow-sky-500/20"
+                            : "bg-slate-800 text-slate-300 border-slate-700 hover:border-slate-600"
+                        }`}
+                      >
+                        {s}x
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
