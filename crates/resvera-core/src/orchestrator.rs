@@ -95,6 +95,7 @@ pub struct JobOrchestrator {
     paused: Arc<AtomicBool>,
     active_job_id: Arc<Mutex<Option<String>>>,
     active_cancel_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    pub staging_dir: Arc<RwLock<Option<PathBuf>>>,
 }
 
 impl JobOrchestrator {
@@ -124,7 +125,17 @@ impl JobOrchestrator {
             paused: Arc::new(AtomicBool::new(false)),
             active_job_id: Arc::new(Mutex::new(None)),
             active_cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
+            staging_dir: Arc::new(RwLock::new(None)),
         }
+    }
+
+    pub fn with_staging_dir<P: AsRef<Path>>(self, staging_dir: P) -> Self {
+        *self.staging_dir.write().unwrap() = Some(staging_dir.as_ref().to_path_buf());
+        self
+    }
+
+    pub fn set_staging_dir<P: AsRef<Path>>(&self, staging_dir: P) {
+        *self.staging_dir.write().unwrap() = Some(staging_dir.as_ref().to_path_buf());
     }
 
     pub fn pause_queue(&self) {
@@ -332,19 +343,21 @@ impl JobOrchestrator {
     }
 
     pub fn cancel_job(&self, job_id: &str) -> Result<(), OrchestratorError> {
+        let job = self
+            .db
+            .get_job(job_id)?
+            .ok_or_else(|| OrchestratorError::JobNotFound(job_id.to_string()))?;
+
         if let Some(token) = self.active_cancel_tokens.lock().unwrap().get(job_id) {
             token.cancel();
         }
         if !self.db.cancel_job(job_id)? {
-            let job = self
-                .db
-                .get_job(job_id)?
-                .ok_or_else(|| OrchestratorError::JobNotFound(job_id.to_string()))?;
             return Err(OrchestratorError::Validation(format!(
                 "Job {job_id} cannot be cancelled from terminal state '{}'",
                 job.state
             )));
         }
+        self.cleanup_staged_input_if_unreferenced(&job.input_path);
         Ok(())
     }
 
@@ -381,6 +394,73 @@ impl JobOrchestrator {
         self.db.run_crash_recovery_sweep()?;
 
         Ok(clean)
+    }
+
+    /// Checks whether an input path points inside the staging directory and, if no active
+    /// or recoverable job still references it, removes the staged file from disk.
+    pub fn cleanup_staged_input_if_unreferenced(&self, input_path: &str) {
+        let staging_guard = self.staging_dir.read().unwrap();
+        let Some(ref staging_dir) = *staging_guard else {
+            return;
+        };
+
+        let path = Path::new(input_path);
+        let is_staged = if let (Ok(canon_input), Ok(canon_staging)) =
+            (path.canonicalize(), staging_dir.canonicalize())
+        {
+            canon_input.starts_with(&canon_staging)
+        } else {
+            path.starts_with(staging_dir)
+        };
+
+        if !is_staged {
+            return;
+        }
+
+        // Only delete if NO queued, preparing, running, finalizing, or interrupted job still references it
+        if let Ok(false) = self.db.has_recoverable_job_for_input(input_path) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    /// Sweeps abandoned files in the staging directory at startup.
+    /// Preserves any file currently referenced by a recoverable (queued/interrupted) job.
+    pub fn sweep_abandoned_staging(&self) -> Result<usize, std::io::Error> {
+        let staging_guard = self.staging_dir.read().unwrap();
+        let Some(ref staging_dir) = *staging_guard else {
+            return Ok(0);
+        };
+        if !staging_dir.is_dir() {
+            return Ok(0);
+        }
+
+        let mut swept = 0;
+        for entry in std::fs::read_dir(staging_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                let clean_path = strip_verbatim_prefix(&path);
+                let path_str = clean_path.to_string_lossy().to_string();
+                let canon_str = path
+                    .canonicalize()
+                    .ok()
+                    .map(|p| strip_verbatim_prefix(p).to_string_lossy().to_string());
+
+                let is_referenced = self
+                    .db
+                    .has_recoverable_job_for_input(&path_str)
+                    .unwrap_or(false)
+                    || canon_str
+                        .as_ref()
+                        .map(|c| self.db.has_recoverable_job_for_input(c).unwrap_or(false))
+                        .unwrap_or(false);
+
+                if !is_referenced && std::fs::remove_file(&path).is_ok() {
+                    swept += 1;
+                }
+            }
+        }
+        Ok(swept)
     }
 
     pub fn retry_job(&self, job_id: &str) -> Result<JobRecord, OrchestratorError> {
@@ -462,17 +542,22 @@ impl JobOrchestrator {
         }
 
         match result {
-            Ok(completed) => Ok(Some(completed)),
+            Ok(completed) => {
+                self.cleanup_staged_input_if_unreferenced(&next_job.input_path);
+                Ok(Some(completed))
+            }
             Err(OrchestratorError::Engine(EngineError::Cancelled))
             | Err(OrchestratorError::Pipeline(PipelineError::Cancelled))
             | Err(OrchestratorError::Cancelled) => {
                 let _ = self.db.cancel_job(&job_id)?;
+                self.cleanup_staged_input_if_unreferenced(&next_job.input_path);
                 Ok(self.db.get_job(&job_id)?)
             }
             Err(e) => {
                 let _ = self
                     .db
                     .update_job_failure(&job_id, "processingFailed", &e.to_string())?;
+                self.cleanup_staged_input_if_unreferenced(&next_job.input_path);
                 Ok(self.db.get_job(&job_id)?)
             }
         }

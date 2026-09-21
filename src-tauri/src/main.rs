@@ -62,7 +62,14 @@ fn main() {
 
             let engine = Arc::new(OrtEngine::new());
             let orchestrator =
-                JobOrchestrator::with_models_root(db, engine, preview_dir, &models_dir);
+                JobOrchestrator::with_models_root(db, engine, preview_dir, &models_dir)
+                    .with_staging_dir(&staging_dir);
+
+            if let Ok(swept) = orchestrator.sweep_abandoned_staging() {
+                if swept > 0 {
+                    tracing::info!(swept, "Swept abandoned staging files at startup");
+                }
+            }
 
             let settings = Arc::new(Mutex::new(initial_settings));
             let models_root = Arc::new(Mutex::new(models_dir));
@@ -73,6 +80,7 @@ fn main() {
                 settings,
                 settings_path,
                 staging_dir,
+                staging_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             };
 
             // Start backend-owned queue worker and keep worker alive for app lifetime
@@ -101,6 +109,11 @@ fn main() {
             save_settings,
             pick_images,
             stage_input_image,
+            stage_input_image_base64,
+            start_staging_upload,
+            append_staging_chunk,
+            finish_staging_upload,
+            abort_staging_upload,
             minimize_window,
             toggle_maximize_window,
             is_window_maximized,

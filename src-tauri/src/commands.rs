@@ -5,9 +5,21 @@ use resvera_core::{
 };
 use resvera_models::ModelInstaller;
 use resvera_persistence::{DatabaseError, JobRecord, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE};
+use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+#[derive(Clone, Debug)]
+pub struct StagingUploadSession {
+    pub id: String,
+    pub temp_path: PathBuf,
+    pub clean_name: String,
+    pub bytes_written: u64,
+    pub created_at: Instant,
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -18,6 +30,7 @@ pub struct AppState {
     pub settings: Arc<Mutex<AppSettings>>,
     pub settings_path: PathBuf,
     pub staging_dir: PathBuf,
+    pub staging_sessions: Arc<Mutex<HashMap<String, StagingUploadSession>>>,
 }
 
 pub fn map_orchestrator_error(err: &OrchestratorError) -> ApiError {
@@ -739,6 +752,280 @@ pub fn stage_input_image_impl(
             details: None,
             retryable: false,
         })
+}
+
+pub fn start_staging_upload_impl(state: &AppState, file_name: String) -> Result<String, ApiError> {
+    state.orchestrator.set_staging_dir(&state.staging_dir);
+    std::fs::create_dir_all(&state.staging_dir).map_err(|e| ApiError {
+        code: ErrorCode::StorageFailure,
+        message: format!("Failed to create staging directory: {e}"),
+        details: None,
+        retryable: false,
+    })?;
+
+    let clean_name = Path::new(&file_name)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("input.png")
+        .to_string();
+
+    let ext = Path::new(&clean_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_else(|| "png".to_string());
+
+    if !["png", "jpg", "jpeg", "webp"].contains(&ext.as_str()) {
+        return Err(ApiError {
+            code: ErrorCode::UnsupportedFormat,
+            message: format!("Unsupported file extension: .{ext}"),
+            details: None,
+            retryable: false,
+        });
+    }
+
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let temp_path = state.staging_dir.join(format!(".upload_{session_id}.tmp"));
+
+    // Create an empty temp file on disk
+    std::fs::File::create(&temp_path).map_err(|e| ApiError {
+        code: ErrorCode::StorageFailure,
+        message: format!("Failed to initialize staging upload: {e}"),
+        details: None,
+        retryable: false,
+    })?;
+
+    let session = StagingUploadSession {
+        id: session_id.clone(),
+        temp_path,
+        clean_name,
+        bytes_written: 0,
+        created_at: Instant::now(),
+    };
+
+    let mut sessions = state.staging_sessions.lock().unwrap();
+    // Prune stale sessions older than 10 minutes
+    sessions.retain(|_, s| s.created_at.elapsed() < Duration::from_secs(600));
+    sessions.insert(session_id.clone(), session);
+
+    Ok(session_id)
+}
+
+pub fn append_staging_chunk_impl(
+    state: &AppState,
+    session_id: &str,
+    chunk_base64: &str,
+) -> Result<(), ApiError> {
+    use base64::Engine;
+    let mut sessions = state.staging_sessions.lock().unwrap();
+    let session = sessions.get_mut(session_id).ok_or_else(|| ApiError {
+        code: ErrorCode::InvalidArgument,
+        message: format!("Staging session '{session_id}' not found or expired"),
+        details: None,
+        retryable: false,
+    })?;
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(chunk_base64.trim())
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(chunk_base64.trim()))
+        .map_err(|e| ApiError {
+            code: ErrorCode::InvalidArgument,
+            message: format!("Failed to decode base64 chunk: {e}"),
+            details: None,
+            retryable: false,
+        })?;
+
+    if session.bytes_written + (bytes.len() as u64) > 200 * 1024 * 1024 {
+        return Err(ApiError {
+            code: ErrorCode::InvalidArgument,
+            message: "Image data exceeds maximum allowed size (200MB)".into(),
+            details: None,
+            retryable: false,
+        });
+    }
+
+    let mut file = OpenOptions::new()
+        .append(true)
+        .open(&session.temp_path)
+        .map_err(|e| ApiError {
+            code: ErrorCode::StorageFailure,
+            message: format!("Failed to open staging temp file: {e}"),
+            details: None,
+            retryable: false,
+        })?;
+
+    file.write_all(&bytes).map_err(|e| ApiError {
+        code: ErrorCode::StorageFailure,
+        message: format!("Failed to append chunk to staging file: {e}"),
+        details: None,
+        retryable: false,
+    })?;
+
+    session.bytes_written += bytes.len() as u64;
+    Ok(())
+}
+
+pub fn finish_staging_upload_impl(state: &AppState, session_id: &str) -> Result<String, ApiError> {
+    let session = {
+        let mut sessions = state.staging_sessions.lock().unwrap();
+        sessions.remove(session_id).ok_or_else(|| ApiError {
+            code: ErrorCode::InvalidArgument,
+            message: format!("Staging session '{session_id}' not found"),
+            details: None,
+            retryable: false,
+        })?
+    };
+
+    if session.bytes_written == 0 {
+        let _ = std::fs::remove_file(&session.temp_path);
+        return Err(ApiError {
+            code: ErrorCode::InvalidArgument,
+            message: "Image data cannot be empty".into(),
+            details: None,
+            retryable: false,
+        });
+    }
+
+    // Inspect format from disk without loading full image into RAM
+    let reader = image::ImageReader::open(&session.temp_path)
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&session.temp_path);
+            ApiError {
+                code: ErrorCode::UnsupportedFormat,
+                message: format!("Failed to open staged file: {e}"),
+                details: None,
+                retryable: false,
+            }
+        })?
+        .with_guessed_format()
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&session.temp_path);
+            ApiError {
+                code: ErrorCode::UnsupportedFormat,
+                message: format!("Failed to determine image format: {e}"),
+                details: None,
+                retryable: false,
+            }
+        })?;
+
+    let format = reader.format().ok_or_else(|| {
+        let _ = std::fs::remove_file(&session.temp_path);
+        ApiError {
+            code: ErrorCode::UnsupportedFormat,
+            message: "Image format is unrecognized. Only PNG, JPEG, and WebP are accepted.".into(),
+            details: None,
+            retryable: false,
+        }
+    })?;
+
+    match format {
+        image::ImageFormat::Png | image::ImageFormat::Jpeg | image::ImageFormat::WebP => {}
+        other => {
+            let _ = std::fs::remove_file(&session.temp_path);
+            return Err(ApiError {
+                code: ErrorCode::UnsupportedFormat,
+                message: format!(
+                    "Image format {other:?} is unsupported. Only PNG, JPEG, and WebP are accepted."
+                ),
+                details: None,
+                retryable: false,
+            });
+        }
+    }
+
+    let staged_file_name = format!("{}_{}", uuid::Uuid::new_v4(), session.clean_name);
+    let staged_path = state.staging_dir.join(staged_file_name);
+
+    std::fs::rename(&session.temp_path, &staged_path).map_err(|e| {
+        let _ = std::fs::remove_file(&session.temp_path);
+        ApiError {
+            code: ErrorCode::StorageFailure,
+            message: format!("Failed to finalize staged file: {e}"),
+            details: None,
+            retryable: false,
+        }
+    })?;
+
+    let canonical = staged_path.canonicalize().unwrap_or(staged_path);
+    let clean = strip_verbatim_prefix(canonical);
+    clean
+        .to_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| ApiError {
+            code: ErrorCode::StorageFailure,
+            message: "Staged path cannot be converted to string".into(),
+            details: None,
+            retryable: false,
+        })
+}
+
+pub fn abort_staging_upload_impl(state: &AppState, session_id: &str) -> Result<(), ApiError> {
+    let mut sessions = state.staging_sessions.lock().unwrap();
+    if let Some(session) = sessions.remove(session_id) {
+        let _ = std::fs::remove_file(&session.temp_path);
+    }
+    Ok(())
+}
+
+pub fn stage_input_image_base64_impl(
+    state: &AppState,
+    file_name: String,
+    base64_data: String,
+) -> Result<String, ApiError> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64_data.trim())
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(base64_data.trim()))
+        .map_err(|e| ApiError {
+            code: ErrorCode::InvalidArgument,
+            message: format!("Failed to decode base64 image data: {e}"),
+            details: None,
+            retryable: false,
+        })?;
+
+    stage_input_image_impl(state, file_name, bytes)
+}
+
+#[tauri::command]
+pub fn start_staging_upload(
+    state: tauri::State<'_, AppState>,
+    file_name: String,
+) -> Result<String, ApiError> {
+    start_staging_upload_impl(&state, file_name)
+}
+
+#[tauri::command]
+pub fn append_staging_chunk(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    chunk_base64: String,
+) -> Result<(), ApiError> {
+    append_staging_chunk_impl(&state, &session_id, &chunk_base64)
+}
+
+#[tauri::command]
+pub fn finish_staging_upload(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<String, ApiError> {
+    finish_staging_upload_impl(&state, &session_id)
+}
+
+#[tauri::command]
+pub fn abort_staging_upload(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<(), ApiError> {
+    abort_staging_upload_impl(&state, &session_id)
+}
+
+#[tauri::command]
+pub fn stage_input_image_base64(
+    state: tauri::State<'_, AppState>,
+    file_name: String,
+    base64_data: String,
+) -> Result<String, ApiError> {
+    stage_input_image_base64_impl(&state, file_name, base64_data)
 }
 
 #[tauri::command]

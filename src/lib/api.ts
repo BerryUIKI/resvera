@@ -319,8 +319,20 @@ export async function pickImages(): Promise<string[]> {
   return [];
 }
 
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const len = bytes.byteLength;
+  const chunkSize = 0x8000;
+  for (let i = 0; i < len; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+  }
+  return btoa(binary);
+}
+
 /**
  * Stage raw image bytes into the backend staging cache.
+ * Uses streaming chunked transfer for large files to avoid JSON number array memory amplification.
  * Returns the staged absolute filesystem path ready for queue submission.
  */
 export async function stageInputImage(
@@ -328,8 +340,29 @@ export async function stageInputImage(
   data: Uint8Array | number[]
 ): Promise<string> {
   if (isTauri()) {
-    const bytes = data instanceof Uint8Array ? Array.from(data) : data;
-    return await invoke<string>("stage_input_image", { fileName, data: bytes });
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+
+    // For smaller files (< 1MB), use single-shot base64 without chunking overhead
+    const STREAM_THRESHOLD = 1024 * 1024; // 1 MB
+    if (bytes.byteLength < STREAM_THRESHOLD) {
+      const base64Data = uint8ArrayToBase64(bytes);
+      return await invoke<string>("stage_input_image_base64", { fileName, base64Data });
+    }
+
+    // For larger files (>= 1MB), stream in 1MB chunks to disk without memory spikes
+    const CHUNK_SIZE = 1024 * 1024; // 1MB chunks
+    const sessionId = await invoke<string>("start_staging_upload", { fileName });
+    try {
+      for (let offset = 0; offset < bytes.byteLength; offset += CHUNK_SIZE) {
+        const chunk = bytes.subarray(offset, Math.min(offset + CHUNK_SIZE, bytes.byteLength));
+        const chunkBase64 = uint8ArrayToBase64(chunk);
+        await invoke("append_staging_chunk", { sessionId, chunkBase64 });
+      }
+      return await invoke<string>("finish_staging_upload", { sessionId });
+    } catch (err) {
+      await invoke("abort_staging_upload", { sessionId }).catch(() => {});
+      throw err;
+    }
   }
   throw new Error("Tauri native desktop runtime is required to stage images.");
 }

@@ -373,6 +373,24 @@ clear_preview_cache() -> void
 
 The frontend does not pass an arbitrary path to a shell-opening command. `reveal_output` resolves a known successful job and opens its parent directory.
 
+### 3.7 Input Image Staging and Lifecycle
+
+```text
+stage_input_image(fileName: string, data: number[]) -> string
+stage_input_image_base64(fileName: string, base64Data: string) -> string
+start_staging_upload(fileName: string) -> string
+append_staging_chunk(sessionId: string, chunkBase64: string) -> void
+finish_staging_upload(sessionId: string) -> string
+abort_staging_upload(sessionId: string) -> void
+```
+
+- **Staged File Lifetime**: Images staged from browser/frontend uploads are stored in the application's dedicated cache `staging` directory.
+- **No JSON Number Array Amplification**: Large file transfers use streaming chunked base64 transfer directly to temporary files on disk, avoiding JSON number array memory amplification in the webview.
+- **Terminal Cleanup**: Staged files are deleted upon terminal job handling (`succeeded`, `failed`, `cancelled`) once no active or recoverable jobs reference the file.
+- **Recoverable Preservation**: Staged files referenced by recoverable jobs (`queued`, `preparing`, `running`, `finalizing`, `interrupted`) are preserved across crashes and restarts.
+- **Startup Sweep**: Unreferenced abandoned files in the staging directory are swept automatically at application startup.
+- **User File Safety**: Files outside the staging directory (e.g. chosen via native file picker) are never deleted by the backend.
+
 ## 4. Events
 
 Events are notifications, not the source of truth. The frontend subscribes before creating work and reconciles with snapshot commands after startup, reconnect, or revision gaps.
