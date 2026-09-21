@@ -316,6 +316,12 @@ remove_job_from_history(jobId: string) -> void
 
 `pause_queue` prevents the next queued job from starting; it does not suspend an active inference call. `cancel_job` is idempotent. Batch creation is transactional: either every validated job is queued or none is.
 
+Job history queries (`list_job_history` / `get_jobs_history`) enforce bounded keyset cursor pagination:
+- **Page Size Limits**: Default limit is 50; requested limits are clamped to `[1, 100]`. A limit of 0 returns a `Validation` error.
+- **Deterministic Ordering**: Strictly ordered by `created_at DESC, id DESC`, ensuring stable paging even with identical timestamps.
+- **Next Cursor**: `nextCursor` is an opaque base64 token returned only when additional records exist beyond the current page; it is `null` when results are exhausted.
+- **Concurrent Mutations**: Using keyset cursors guarantees that concurrent insertions or row deletions do not shift offsets, produce duplicate records, or cause paging to skip rows.
+
 ```typescript
 export interface QueueSnapshot {
   paused: boolean;

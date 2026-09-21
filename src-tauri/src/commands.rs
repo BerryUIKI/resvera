@@ -4,7 +4,7 @@ use resvera_core::{
     UpscaleJobRequest as CoreJobRequest,
 };
 use resvera_models::ModelInstaller;
-use resvera_persistence::JobRecord;
+use resvera_persistence::{DatabaseError, JobRecord, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -1065,21 +1065,44 @@ pub fn get_job(state: tauri::State<'_, AppState>, job_id: String) -> Result<JobS
     get_job_impl(&state, &job_id)
 }
 
-pub fn get_jobs_history_impl(state: &AppState, limit: usize) -> Result<JobHistoryPage, ApiError> {
-    let records = state
-        .orchestrator
-        .db
-        .list_recent_jobs(limit)
-        .map_err(|e| ApiError {
-            code: ErrorCode::StorageFailure,
-            message: e.to_string(),
+pub fn get_jobs_history_impl(
+    state: &AppState,
+    limit: Option<usize>,
+    cursor: Option<String>,
+) -> Result<JobHistoryPage, ApiError> {
+    if let Some(0) = limit {
+        return Err(ApiError {
+            code: ErrorCode::InvalidArgument,
+            message: "Page limit must be at least 1".to_string(),
             details: None,
             retryable: false,
+        });
+    }
+
+    let capped_limit = limit.unwrap_or(DEFAULT_PAGE_SIZE).min(MAX_PAGE_SIZE);
+
+    let (records, next_cursor) = state
+        .orchestrator
+        .db
+        .list_jobs_page(capped_limit, cursor.as_deref())
+        .map_err(|e| match e {
+            DatabaseError::InvalidCursor(msg) => ApiError {
+                code: ErrorCode::InvalidArgument,
+                message: msg,
+                details: None,
+                retryable: false,
+            },
+            other => ApiError {
+                code: ErrorCode::StorageFailure,
+                message: other.to_string(),
+                details: None,
+                retryable: false,
+            },
         })?;
 
     Ok(JobHistoryPage {
         jobs: records.into_iter().map(job_record_to_snapshot).collect(),
-        next_cursor: None,
+        next_cursor,
     })
 }
 
@@ -1087,8 +1110,18 @@ pub fn get_jobs_history_impl(state: &AppState, limit: usize) -> Result<JobHistor
 pub fn get_jobs_history(
     state: tauri::State<'_, AppState>,
     limit: Option<usize>,
+    cursor: Option<String>,
 ) -> Result<JobHistoryPage, ApiError> {
-    get_jobs_history_impl(&state, limit.unwrap_or(50))
+    get_jobs_history_impl(&state, limit, cursor)
+}
+
+#[tauri::command]
+pub fn list_job_history(
+    state: tauri::State<'_, AppState>,
+    cursor: Option<String>,
+    limit: Option<usize>,
+) -> Result<JobHistoryPage, ApiError> {
+    get_jobs_history_impl(&state, limit, cursor)
 }
 
 pub fn validate_settings(settings: &AppSettings) -> Result<(), ApiError> {

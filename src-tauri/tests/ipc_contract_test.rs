@@ -4,7 +4,7 @@ use resvera_desktop::ipc_types::*;
 use resvera_desktop::worker::QueueWorker;
 use resvera_engine_ort::OrtEngine;
 use resvera_models::{compute_file_sha256, ModelInstaller};
-use resvera_persistence::AppDatabase;
+use resvera_persistence::{AppDatabase, JobRecord};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -130,9 +130,10 @@ fn test_ipc_commands_workflow() {
     assert_eq!(fetched.state, "queued");
 
     // 5. Job history list
-    let history = get_jobs_history_impl(&state, 10).unwrap();
+    let history = get_jobs_history_impl(&state, Some(10), None).unwrap();
     assert_eq!(history.jobs.len(), 1);
     assert_eq!(history.jobs[0].id, snapshot.id);
+    assert_eq!(history.next_cursor, None);
 }
 
 #[test]
@@ -834,4 +835,123 @@ fn test_coordinated_application_shutdown() {
         "Job must be in a clean persisted state after shutdown, got {}",
         retrieved.state
     );
+}
+
+#[test]
+fn test_job_history_bounded_cursor_pagination_workflow() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::open(temp.path().join("test.db")).unwrap();
+    let models_root = temp.path().join("models");
+    install_test_model(&models_root);
+
+    let engine = Arc::new(OrtEngine::new());
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db.clone(),
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    );
+
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(models_root)),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path: temp.path().join("settings.json"),
+        staging_dir: temp.path().join("staging"),
+    };
+
+    // Insert 5 completed jobs with deterministic timestamps into DB
+    for i in 1..=5 {
+        let job = JobRecord {
+            id: format!("hist-job-{i}"),
+            state: "completed".to_string(),
+            input_path: "/dummy/input.png".to_string(),
+            output_path: Some("/dummy/out.png".to_string()),
+            preview_path: None,
+            model_id: "realesrgan-x4plus".to_string(),
+            model_package_version: "1.0.0".to_string(),
+            model_variant_id: "default".to_string(),
+            target_scale: 4,
+            engine_id: "ort".to_string(),
+            provider_id: Some("cpu".to_string()),
+            progress_fraction: 1.0,
+            progress_stage: "completed".to_string(),
+            error_code: None,
+            error_message: None,
+            output_directory: None,
+            output_format_json: None,
+            overwrite: false,
+            tile_size: None,
+            tile_overlap: None,
+            blend_mode: None,
+            naming_template: None,
+            created_at: format!("2026-09-21T10:0{i}:00Z"),
+            updated_at: format!("2026-09-21T10:0{i}:00Z"),
+        };
+        db.insert_job(&job).unwrap();
+    }
+
+    // Page 1: limit 2
+    let page1 = get_jobs_history_impl(&state, Some(2), None).unwrap();
+    assert_eq!(page1.jobs.len(), 2);
+    assert_eq!(page1.jobs[0].id, "hist-job-5");
+    assert_eq!(page1.jobs[1].id, "hist-job-4");
+    assert!(page1.next_cursor.is_some());
+
+    // Page 2: limit 2 with cursor from page 1
+    let page2 = get_jobs_history_impl(&state, Some(2), page1.next_cursor).unwrap();
+    assert_eq!(page2.jobs.len(), 2);
+    assert_eq!(page2.jobs[0].id, "hist-job-3");
+    assert_eq!(page2.jobs[1].id, "hist-job-2");
+    assert!(page2.next_cursor.is_some());
+
+    // Page 3: limit 2 with cursor from page 2
+    let page3 = get_jobs_history_impl(&state, Some(2), page2.next_cursor).unwrap();
+    assert_eq!(page3.jobs.len(), 1);
+    assert_eq!(page3.jobs[0].id, "hist-job-1");
+    assert_eq!(
+        page3.next_cursor, None,
+        "Final page must have next_cursor: None"
+    );
+}
+
+#[test]
+fn test_job_history_validation_and_bounds() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::open(temp.path().join("test.db")).unwrap();
+    let models_root = temp.path().join("models");
+    install_test_model(&models_root);
+
+    let engine = Arc::new(OrtEngine::new());
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    );
+
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(models_root)),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path: temp.path().join("settings.json"),
+        staging_dir: temp.path().join("staging"),
+    };
+
+    // 1. Limit = 0 must be rejected with validation error
+    let zero_res = get_jobs_history_impl(&state, Some(0), None);
+    assert!(zero_res.is_err());
+    let err = zero_res.unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+
+    // 2. Limit > MAX_PAGE_SIZE (100) must be capped at 100 without error
+    let capped_res = get_jobs_history_impl(&state, Some(500), None);
+    assert!(capped_res.is_ok());
+
+    // 3. Invalid cursor format must return validation error
+    let invalid_cursor_res =
+        get_jobs_history_impl(&state, Some(10), Some("invalid-token!#%".to_string()));
+    assert!(invalid_cursor_res.is_err());
+    let err = invalid_cursor_res.unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
 }

@@ -96,6 +96,7 @@ fn main() {
             get_queue,
             get_job,
             get_jobs_history,
+            list_job_history,
             load_settings,
             save_settings,
             pick_images,

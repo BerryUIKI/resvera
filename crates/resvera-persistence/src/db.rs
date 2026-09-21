@@ -12,6 +12,8 @@ pub enum DatabaseError {
     Json(#[from] serde_json::Error),
     #[error("Constraint violation: {0}")]
     Constraint(String),
+    #[error("Invalid cursor: {0}")]
+    InvalidCursor(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -105,6 +107,7 @@ impl AppDatabase {
 
             CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state);
             CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
+            CREATE INDEX IF NOT EXISTS idx_jobs_created_at_id ON jobs(created_at DESC, id DESC);
 
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -417,19 +420,116 @@ impl AppDatabase {
         Ok(count as usize)
     }
 
-    /// Lists recent jobs up to the specified limit, ordered by creation time descending.
-    pub fn list_recent_jobs(&self, limit: usize) -> Result<Vec<JobRecord>, DatabaseError> {
+    /// Deletes a job record from the database by ID. Returns true if a record was deleted.
+    pub fn delete_job(&self, id: &str) -> Result<bool, DatabaseError> {
         let conn = self.conn.lock().unwrap();
-        let query = format!("SELECT {JOB_COLUMNS} FROM jobs ORDER BY created_at DESC LIMIT ?1");
-        let mut stmt = conn.prepare(&query)?;
-        let rows = stmt.query_map(params![limit as i64], row_to_job)?;
+        let affected = conn.execute("DELETE FROM jobs WHERE id = ?1", params![id])?;
+        Ok(affected > 0)
+    }
+
+    /// Lists a page of jobs with deterministic ordering (created_at DESC, id DESC).
+    /// If a cursor is provided, returns jobs positioned strictly after that cursor.
+    /// Caps limit between MIN_PAGE_SIZE and MAX_PAGE_SIZE.
+    /// Returns the jobs and an optional next_cursor when more records exist.
+    pub fn list_jobs_page(
+        &self,
+        limit: usize,
+        cursor: Option<&str>,
+    ) -> Result<(Vec<JobRecord>, Option<String>), DatabaseError> {
+        let effective_limit = limit.clamp(MIN_PAGE_SIZE, MAX_PAGE_SIZE);
+        let fetch_limit = (effective_limit as i64) + 1;
+        let conn = self.conn.lock().unwrap();
 
         let mut jobs = Vec::new();
-        for job_res in rows {
-            jobs.push(job_res?);
+        if let Some(cursor_str) = cursor {
+            let (cursor_created_at, cursor_id) = decode_cursor(cursor_str)?;
+            let query = format!(
+                "SELECT {JOB_COLUMNS} FROM jobs \
+                 WHERE (created_at < ?1) OR (created_at = ?1 AND id < ?2) \
+                 ORDER BY created_at DESC, id DESC LIMIT ?3"
+            );
+            let mut stmt = conn.prepare(&query)?;
+            let rows = stmt.query_map(
+                params![cursor_created_at, cursor_id, fetch_limit],
+                row_to_job,
+            )?;
+            for row in rows {
+                jobs.push(row?);
+            }
+        } else {
+            let query = format!(
+                "SELECT {JOB_COLUMNS} FROM jobs \
+                 ORDER BY created_at DESC, id DESC LIMIT ?1"
+            );
+            let mut stmt = conn.prepare(&query)?;
+            let rows = stmt.query_map(params![fetch_limit], row_to_job)?;
+            for row in rows {
+                jobs.push(row?);
+            }
         }
+
+        let next_cursor = if jobs.len() > effective_limit {
+            jobs.truncate(effective_limit);
+            jobs.last()
+                .map(|last_job| encode_cursor(&last_job.created_at, &last_job.id))
+        } else {
+            None
+        };
+
+        Ok((jobs, next_cursor))
+    }
+
+    /// Lists recent jobs up to the specified limit, ordered by creation time descending.
+    pub fn list_recent_jobs(&self, limit: usize) -> Result<Vec<JobRecord>, DatabaseError> {
+        let (jobs, _) = self.list_jobs_page(limit, None)?;
         Ok(jobs)
     }
+}
+
+pub const DEFAULT_PAGE_SIZE: usize = 50;
+pub const MAX_PAGE_SIZE: usize = 100;
+pub const MIN_PAGE_SIZE: usize = 1;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CursorPayload {
+    t: String,
+    id: String,
+}
+
+pub fn encode_cursor(created_at: &str, id: &str) -> String {
+    use base64::Engine;
+    let payload = CursorPayload {
+        t: created_at.to_string(),
+        id: id.to_string(),
+    };
+    let json = serde_json::to_string(&payload).unwrap_or_default();
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json.as_bytes())
+}
+
+pub fn decode_cursor(cursor: &str) -> Result<(String, String), DatabaseError> {
+    use base64::Engine;
+    let trimmed = cursor.trim();
+    if trimmed.is_empty() {
+        return Err(DatabaseError::InvalidCursor("Cursor is empty".to_string()));
+    }
+
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(trimmed)
+        .or_else(|_| base64::engine::general_purpose::STANDARD.decode(trimmed))
+        .map_err(|e| {
+            DatabaseError::InvalidCursor(format!("Failed to decode base64 cursor: {e}"))
+        })?;
+
+    let payload: CursorPayload = serde_json::from_slice(&bytes)
+        .map_err(|e| DatabaseError::InvalidCursor(format!("Invalid cursor payload: {e}")))?;
+
+    if payload.t.is_empty() || payload.id.is_empty() {
+        return Err(DatabaseError::InvalidCursor(
+            "Cursor is missing required fields".to_string(),
+        ));
+    }
+
+    Ok((payload.t, payload.id))
 }
 
 const JOB_COLUMNS: &str = "id, state, input_path, output_path, preview_path, \

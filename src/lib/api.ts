@@ -215,9 +215,9 @@ export async function createBatchJobs(req: { inputs: string[]; defaults: any }):
   throw new Error("Tauri native runtime required for batch jobs; simulation disabled.");
 }
 
-export async function getJobsHistory(limit = 50): Promise<JobHistoryPage> {
+export async function getJobsHistory(limit = 50, cursor?: string | null): Promise<JobHistoryPage> {
   if (isTauri()) {
-    return await invoke<JobHistoryPage>("get_jobs_history", { limit });
+    return await invoke<JobHistoryPage>("get_jobs_history", { limit, cursor: cursor ?? null });
   }
   return { jobs: [], nextCursor: null };
 }
