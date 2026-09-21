@@ -83,6 +83,14 @@ export interface ModelVariantSummary {
   strength: string | null;
 }
 
+export interface ModelInstallProgress {
+  modelId: string;
+  bytesDownloaded: number;
+  totalBytes: number | null;
+  fraction: number;
+  stage: string;
+}
+
 export type JobState =
   | "queued"
   | "preparing"

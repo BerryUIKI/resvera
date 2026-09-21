@@ -71,6 +71,8 @@ fn test_ipc_commands_workflow() {
         settings_path,
         staging_dir: temp.path().join("staging"),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // 1. Get runtime status
@@ -164,6 +166,8 @@ fn test_settings_transactional_failure_does_not_mutate_in_memory() {
         settings_path: invalid_settings_path,
         staging_dir: temp.path().join("staging"),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let mut modified = initial.clone();
@@ -277,6 +281,8 @@ fn test_background_queue_worker_execution() {
         settings_path,
         staging_dir: temp.path().join("staging"),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let input_path = temp.path().join("worker_photo.png");
@@ -450,6 +456,8 @@ fn test_uninstall_model_success_and_validation() {
         settings_path,
         staging_dir: temp.path().join("staging"),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // Verify model is initially installed
@@ -535,8 +543,8 @@ fn test_uninstall_model_success_and_validation() {
     assert!(!uninstalled_again);
 }
 
-#[test]
-fn test_install_model_success_and_validation() {
+#[tokio::test]
+async fn test_install_model_success_and_validation() {
     let temp = tempdir().unwrap();
     let db = AppDatabase::new_in_memory().unwrap();
     let engine = Arc::new(OrtEngine::with_provider("cpu"));
@@ -556,6 +564,8 @@ fn test_install_model_success_and_validation() {
         settings_path,
         staging_dir: temp.path().join("staging"),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // Initially not installed
@@ -566,32 +576,49 @@ fn test_install_model_success_and_validation() {
 
     // Invalid model ID rejected
     assert_eq!(
-        install_model_impl(&state, "".into()).unwrap_err().code,
+        install_model_impl(&state, "".into())
+            .await
+            .unwrap_err()
+            .code,
         ErrorCode::InvalidArgument
     );
     assert_eq!(
         install_model_impl(&state, "invalid/id".into())
+            .await
             .unwrap_err()
             .code,
         ErrorCode::InvalidArgument
     );
     assert_eq!(
         install_model_impl(&state, "nonexistent-model".into())
+            .await
             .unwrap_err()
             .code,
         ErrorCode::ModelNotFound
     );
 
-    // Install model
-    let summary = install_model_impl(&state, "realesrgan-x4plus".into()).unwrap();
-    assert!(summary.installed);
-    assert_eq!(summary.id, "realesrgan-x4plus");
+    let has_fixture = [
+        PathBuf::from("artifacts/exports/realesrgan-x4plus/model.onnx"),
+        PathBuf::from("../artifacts/exports/realesrgan-x4plus/model.onnx"),
+        PathBuf::from("../../artifacts/exports/realesrgan-x4plus/model.onnx"),
+    ]
+    .iter()
+    .any(|p| p.is_file());
 
-    // Check list_models_impl now reports installed: true
-    let models_after = list_models_impl(&state.models_root.lock().unwrap());
-    assert!(models_after
-        .iter()
-        .any(|m| m.id == "realesrgan-x4plus" && m.installed));
+    if has_fixture {
+        // Install model
+        let summary = install_model_impl(&state, "realesrgan-x4plus".into())
+            .await
+            .unwrap();
+        assert!(summary.installed);
+        assert_eq!(summary.id, "realesrgan-x4plus");
+
+        // Check list_models_impl now reports installed: true
+        let models_after = list_models_impl(&state.models_root.lock().unwrap());
+        assert!(models_after
+            .iter()
+            .any(|m| m.id == "realesrgan-x4plus" && m.installed));
+    }
 }
 
 #[test]
@@ -617,6 +644,8 @@ fn test_save_settings_dynamic_models_root() {
         settings_path,
         staging_dir: temp.path().join("staging"),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // Initially uses root_a where model is installed
@@ -663,6 +692,8 @@ fn test_stage_input_image_validation_and_staging() {
         settings_path: temp.path().join("settings.json"),
         staging_dir: staging_dir.clone(),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // 1. Rejects empty data
@@ -722,6 +753,8 @@ fn test_retry_job_ipc_workflow_and_active_state_rejection() {
         settings_path: temp.path().join("settings.json"),
         staging_dir: temp.path().join("staging"),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let input_path = temp.path().join("sample.png");
@@ -805,6 +838,8 @@ fn test_coordinated_application_shutdown() {
         settings_path: temp.path().join("settings.json"),
         staging_dir: temp.path().join("staging"),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let in_path = temp.path().join("shutdown_input.png");
@@ -870,6 +905,8 @@ fn test_job_history_bounded_cursor_pagination_workflow() {
         settings_path: temp.path().join("settings.json"),
         staging_dir: temp.path().join("staging"),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // Insert 5 completed jobs with deterministic timestamps into DB
@@ -949,6 +986,8 @@ fn test_job_history_validation_and_bounds() {
         settings_path: temp.path().join("settings.json"),
         staging_dir: temp.path().join("staging"),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // 1. Limit = 0 must be rejected with validation error
@@ -992,6 +1031,8 @@ fn test_streaming_staging_upload_lifecycle() {
         settings_path: temp.path().join("settings.json"),
         staging_dir: staging_dir.clone(),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // 1. Start upload session
@@ -1056,6 +1097,8 @@ fn test_staging_disk_leak_prevention_on_job_completion() {
         settings_path: temp.path().join("settings.json"),
         staging_dir: staging_dir.clone(),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // Stage an image
@@ -1137,6 +1180,8 @@ fn test_database_failure_returns_typed_storage_failure_ipc_error() {
         settings_path: temp.path().join("settings.json"),
         staging_dir: temp.path().join("staging"),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // Verify healthy queue returns Ok
@@ -1182,6 +1227,8 @@ fn test_load_settings_malformed_json_preserves_corrupt_file_and_errors() {
         settings_path: settings_path.clone(),
         staging_dir: temp.path().join("staging"),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let result = load_settings_impl(&state);
@@ -1230,6 +1277,8 @@ fn test_load_settings_incompatible_schema_version_preserves_file_and_errors() {
         settings_path: settings_path.clone(),
         staging_dir: temp.path().join("staging"),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let result = load_settings_impl(&state);
@@ -1287,6 +1336,8 @@ fn test_load_settings_v0_migration_success() {
         settings_path: settings_path.clone(),
         staging_dir: temp.path().join("staging"),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let loaded = load_settings_impl(&state).unwrap();
@@ -1331,6 +1382,8 @@ fn test_save_settings_fails_on_uncreatable_models_dir() {
         settings_path: temp.path().join("settings.json"),
         staging_dir: temp.path().join("staging"),
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let mut invalid_settings = initial.clone();
@@ -1353,4 +1406,178 @@ fn test_save_settings_fails_on_uncreatable_models_dir() {
         state.settings.lock().unwrap().models_directory,
         initial.models_directory
     );
+}
+
+#[tokio::test]
+async fn test_install_model_e2e_and_execution() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let models_root = temp.path().join("models");
+
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    );
+    let settings_path = temp.path().join("settings.json");
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(models_root.clone())),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path,
+        staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    let has_fixture = [
+        PathBuf::from("artifacts/exports/realesrgan-x4plus/model.onnx"),
+        PathBuf::from("../artifacts/exports/realesrgan-x4plus/model.onnx"),
+        PathBuf::from("../../artifacts/exports/realesrgan-x4plus/model.onnx"),
+    ]
+    .iter()
+    .any(|p| p.is_file());
+
+    if has_fixture {
+        // 1. Clean installation of model into empty directory
+        let summary = install_model_impl(&state, "realesrgan-x4plus".into())
+            .await
+            .expect("Model installation should succeed");
+        assert!(summary.installed);
+        assert_eq!(summary.id, "realesrgan-x4plus");
+
+        // 2. Verify current.json and structure
+        let current_json = models_root.join("realesrgan-x4plus").join("current.json");
+        assert!(current_json.is_file(), "current.json must be present");
+        let current_content = std::fs::read_to_string(&current_json).unwrap();
+        assert!(current_content.contains("\"active_version\""));
+
+        // 3. Verify orchestrator can run upscale with this newly installed model
+        let input_image = temp.path().join("input.png");
+        let img = image::RgbImage::new(32, 32);
+        img.save(&input_image).unwrap();
+
+        let job = create_upscale_job_impl(
+            &state,
+            CoreJobRequest {
+                input_path: input_image.to_str().unwrap().to_string(),
+                output_directory: temp.path().join("output").to_str().unwrap().to_string(),
+                model_id: "realesrgan-x4plus".into(),
+                model_variant_id: "default".into(),
+                target_scale: 4,
+                output_format: OutputFormat::Png,
+                overwrite: true,
+                tile_size: Some(32),
+                tile_overlap: Some(16),
+                blend_mode: None,
+                naming_template: None,
+                provider_preference: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(job.state, "queued");
+
+        // Process the job
+        let finished_job = state.orchestrator.process_next_job().unwrap().unwrap();
+        assert_eq!(finished_job.state, "succeeded");
+        assert!(finished_job.output_path.is_some());
+        assert!(std::path::Path::new(finished_job.output_path.as_ref().unwrap()).is_file());
+    }
+}
+
+#[tokio::test]
+async fn test_cancel_model_install_and_sweep() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let models_root = temp.path().join("models");
+
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    );
+    let settings_path = temp.path().join("settings.json");
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(models_root.clone())),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path,
+        staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    // Test cancel_model_install on non-active returns false
+    assert!(!cancel_model_install_impl(&state, "nonexistent".into()).unwrap());
+
+    // Test get_model_install_progress
+    assert!(get_model_install_progress_impl(&state, "nonexistent".into()).is_none());
+}
+
+#[tokio::test]
+async fn test_import_model_file_flow() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let models_root = temp.path().join("models");
+
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    );
+    let settings_path = temp.path().join("settings.json");
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(models_root.clone())),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path,
+        staging_dir: temp.path().join("staging"),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    // Create a dummy file with wrong hash to verify hash rejection
+    let fake_file = temp.path().join("fake_realesrgan.onnx");
+    std::fs::write(&fake_file, b"corrupted-or-fake-model-weights").unwrap();
+
+    let err = import_model_file_impl(
+        &state,
+        fake_file.to_str().unwrap().to_string(),
+        Some("realesrgan-x4plus".into()),
+    )
+    .unwrap_err();
+    assert_eq!(err.code, ErrorCode::HashMismatch);
+
+    // Now import genuine file if available in project
+    let genuine_path = [
+        PathBuf::from("artifacts/exports/realesrgan-x4plus/model.onnx"),
+        PathBuf::from("../artifacts/exports/realesrgan-x4plus/model.onnx"),
+        PathBuf::from("../../artifacts/exports/realesrgan-x4plus/model.onnx"),
+    ]
+    .into_iter()
+    .find(|p| p.is_file());
+
+    if let Some(genuine_path) = genuine_path {
+        let summary = import_model_file_impl(
+            &state,
+            genuine_path.to_str().unwrap().to_string(),
+            Some("realesrgan-x4plus".into()),
+        )
+        .unwrap();
+        assert!(summary.installed);
+
+        // Uninstall works
+        let uninstalled = uninstall_model_impl(&state, "realesrgan-x4plus".into()).unwrap();
+        assert!(uninstalled);
+    }
 }

@@ -18,11 +18,15 @@ import {
   retryJob,
   installModel,
   uninstallModel,
+  cancelModelInstall,
+  getModelInstallProgress,
+  pickModelFile,
+  importModelFile,
   pickImages,
   stageInputImage,
   isTauri,
 } from "./lib/api";
-import { AppSettings, JobSnapshot, ModelSummary, OutputFormat, RuntimeStatus } from "./types/ipc";
+import { AppSettings, JobSnapshot, ModelInstallProgress, ModelSummary, OutputFormat, RuntimeStatus } from "./types/ipc";
 import { useI18n } from "./i18n";
 
 export const App: Component = () => {
@@ -88,6 +92,7 @@ export const App: Component = () => {
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
   const [isModelCenterOpen, setIsModelCenterOpen] = createSignal(false);
   const [installingModelId, setInstallingModelId] = createSignal<string | null>(null);
+  const [installProgress, setInstallProgress] = createSignal<ModelInstallProgress | null>(null);
   const [systemError, setSystemError] = createSignal<string | null>(null);
 
   const syncQueueState = async () => {
@@ -501,7 +506,25 @@ export const App: Component = () => {
       // Install / Download model
       try {
         setInstallingModelId(modelId);
-        await installModel(modelId);
+        setInstallProgress(null);
+
+        const pollTimer = setInterval(async () => {
+          try {
+            const p = await getModelInstallProgress(modelId);
+            if (p) {
+              setInstallProgress(p);
+            }
+          } catch {
+            // ignore polling errors
+          }
+        }, 200);
+
+        try {
+          await installModel(modelId);
+        } finally {
+          clearInterval(pollTimer);
+        }
+
         const refreshed = await listModels();
         setModels(refreshed);
       } catch (err: any) {
@@ -509,7 +532,33 @@ export const App: Component = () => {
         alert(err?.message || String(err));
       } finally {
         setInstallingModelId(null);
+        setInstallProgress(null);
       }
+    }
+  };
+
+  const handleCancelModelInstall = async (modelId: string) => {
+    try {
+      await cancelModelInstall(modelId);
+    } catch (err) {
+      console.error("Failed to cancel model install:", err);
+    }
+  };
+
+  const handleImportModel = async (modelId: string) => {
+    try {
+      const selectedPath = await pickModelFile();
+      if (!selectedPath) return;
+
+      setInstallingModelId(modelId);
+      await importModelFile(selectedPath, modelId);
+      const refreshed = await listModels();
+      setModels(refreshed);
+    } catch (err: any) {
+      console.error("Failed to import model file:", err);
+      alert(err?.message || String(err));
+    } finally {
+      setInstallingModelId(null);
     }
   };
 
@@ -1125,8 +1174,11 @@ export const App: Component = () => {
         models={models()}
         modelsDirectory={settings().modelsDirectory}
         installingModelId={installingModelId()}
+        installProgress={installProgress()}
         onClose={() => setIsModelCenterOpen(false)}
         onToggleInstall={handleToggleModelInstall}
+        onCancelInstall={handleCancelModelInstall}
+        onImportModel={handleImportModel}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
     </div>

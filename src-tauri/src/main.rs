@@ -110,6 +110,13 @@ fn main() {
                 }
             }
 
+            let downloader = resvera_models::StagedDownloader::new(&models_dir);
+            if let Ok(swept) = downloader.sweep_stale_staging_dirs() {
+                if swept > 0 {
+                    tracing::info!(swept, "Swept stale model staging directories at startup");
+                }
+            }
+
             let settings = Arc::new(Mutex::new(initial_settings));
             let models_root = Arc::new(Mutex::new(models_dir));
 
@@ -120,6 +127,8 @@ fn main() {
                 settings_path,
                 staging_dir,
                 staging_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+                active_installs: Arc::new(Mutex::new(std::collections::HashMap::new())),
+                install_progress: Arc::new(Mutex::new(std::collections::HashMap::new())),
             };
 
             // Start backend-owned queue worker and keep worker alive for app lifetime
@@ -133,6 +142,10 @@ fn main() {
             get_runtime_status,
             list_models,
             install_model,
+            cancel_model_install,
+            import_model_file,
+            get_model_install_progress,
+            pick_model_file,
             uninstall_model,
             create_upscale_job,
             create_batch_jobs,

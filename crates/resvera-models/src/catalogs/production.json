@@ -1,0 +1,190 @@
+{
+  "catalog_version": 1,
+  "updated_at": "2026-09-21T00:00:00Z",
+  "models": [
+    {
+      "id": "realesrgan-x4plus",
+      "version": "1.0.0",
+      "display_name": "Real-ESRGAN x4plus",
+      "family": "rrdb",
+      "category": "photo",
+      "description": "Official Real-ESRGAN x4plus general photo restoration model",
+      "license_spdx": "BSD-3-Clause",
+      "redistribution_review": "approved",
+      "size_bytes": 67051644,
+      "sha256": "aecc663c9d74f1c4c1a7534833dc2629091a0ae8bd5d89056ebbc0d9ffae30fb",
+      "manifest_sha256": "b7e787bb40a84b35b9b3598617ca2906f6ef5e588925e2c5374b868c40d51e80",
+      "download_urls": [
+        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"
+      ],
+      "signature": "e8280360b4f39baf49ca2b9eb76ef91c8c1b23c52f23e8226774eb316fccc707dca3611e66d09905861050c87d688fbc763a233aa8663f36b17a2d520f189708",
+      "native_scales": [
+        4
+      ],
+      "validated_providers": [
+        "cpu",
+        "directml",
+        "coreml"
+      ],
+      "variants": [
+        {
+          "id": "default",
+          "native_scale": 4,
+          "strength": null
+        }
+      ],
+      "manifest_template": "{\n  \"schema_version\": 1,\n  \"id\": \"realesrgan-x4plus\",\n  \"package_version\": \"1.0.0\",\n  \"display_name\": \"Real-ESRGAN x4plus\",\n  \"family\": \"rrdb\",\n  \"category\": \"photo\",\n  \"description\": \"Official Real-ESRGAN x4plus general photo restoration model\",\n  \"license\": {\n    \"spdx\": \"BSD-3-Clause\",\n    \"upstream_url\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"redistribution_review\": \"approved\"\n  },\n  \"provenance\": {\n    \"upstream_repository\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"upstream_revision\": \"v0.3.0\",\n    \"source_weight_name\": \"realesrgan-x4plus.pth\",\n    \"source_weight_sha256\": \"0000000000000000000000000000000000000000000000000000000000000000\",\n    \"export_recipe\": \"official-onnx-export\"\n  },\n  \"variants\": [\n    {\n      \"id\": \"default\",\n      \"native_scale\": 4,\n      \"strength\": null,\n      \"artifact\": \"artifacts/model.onnx\"\n    }\n  ],\n  \"tensor\": {\n    \"input_name\": \"input\",\n    \"output_name\": \"output\",\n    \"layout\": \"NCHW\",\n    \"channels\": \"RGB\",\n    \"input_range\": [\n      0.0,\n      1.0\n    ],\n    \"output_range\": [\n      0.0,\n      1.0\n    ],\n    \"element_type\": \"float32\"\n  },\n  \"tiling\": {\n    \"alignment\": 1,\n    \"minimum\": 32,\n    \"recommended\": 256,\n    \"overlap\": 16,\n    \"window_size\": null,\n    \"static_shapes_required\": false\n  },\n  \"compatibility\": {\n    \"engine\": \"onnx-runtime\",\n    \"minimum_engine_version\": \"1.16.0\",\n    \"validated_providers\": [\n      \"cpu\",\n      \"directml\",\n      \"coreml\"\n    ],\n    \"validated_precisions\": [\n      \"fp32\"\n    ]\n  },\n  \"artifacts\": [\n    {\n      \"path\": \"artifacts/model.onnx\",\n      \"size_bytes\": 67051644,\n      \"sha256\": \"aecc663c9d74f1c4c1a7534833dc2629091a0ae8bd5d89056ebbc0d9ffae30fb\"\n    }\n  ]\n}"
+    },
+    {
+      "id": "realesrgan-x4plus-anime",
+      "version": "1.0.0",
+      "display_name": "Real-ESRGAN x4plus Anime (6B)",
+      "family": "rrdb-6b",
+      "category": "anime",
+      "description": "Official Real-ESRGAN anime 6B compact restoration model",
+      "license_spdx": "BSD-3-Clause",
+      "redistribution_review": "approved",
+      "size_bytes": 17939969,
+      "sha256": "8db771cf05a8224e95438f99f5ab38eaef9b6c464dde0f6fecf6bce8a0b7fe71",
+      "manifest_sha256": "b5d0f98cedea357b283f019cd587757ae58591eed4d469ede55224faccce3cdd",
+      "download_urls": [
+        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth"
+      ],
+      "signature": "31329c7b3c4db7136c4675d4daa311465cdaf2f29c7dad6fd76bf82326333b3745e6cb646ecf4830d5bca15d74344b16c62ea6d7a73c1fd5704742758cd49708",
+      "native_scales": [
+        4
+      ],
+      "validated_providers": [
+        "cpu",
+        "directml",
+        "coreml"
+      ],
+      "variants": [
+        {
+          "id": "default",
+          "native_scale": 4,
+          "strength": null
+        }
+      ],
+      "manifest_template": "{\n  \"schema_version\": 1,\n  \"id\": \"realesrgan-x4plus-anime\",\n  \"package_version\": \"1.0.0\",\n  \"display_name\": \"Real-ESRGAN x4plus Anime (6B)\",\n  \"family\": \"rrdb-6b\",\n  \"category\": \"anime\",\n  \"description\": \"Official Real-ESRGAN anime 6B compact restoration model\",\n  \"license\": {\n    \"spdx\": \"BSD-3-Clause\",\n    \"upstream_url\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"redistribution_review\": \"approved\"\n  },\n  \"provenance\": {\n    \"upstream_repository\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"upstream_revision\": \"v0.3.0\",\n    \"source_weight_name\": \"realesrgan-x4plus-anime.pth\",\n    \"source_weight_sha256\": \"0000000000000000000000000000000000000000000000000000000000000000\",\n    \"export_recipe\": \"official-onnx-export\"\n  },\n  \"variants\": [\n    {\n      \"id\": \"default\",\n      \"native_scale\": 4,\n      \"strength\": null,\n      \"artifact\": \"artifacts/model.onnx\"\n    }\n  ],\n  \"tensor\": {\n    \"input_name\": \"input\",\n    \"output_name\": \"output\",\n    \"layout\": \"NCHW\",\n    \"channels\": \"RGB\",\n    \"input_range\": [\n      0.0,\n      1.0\n    ],\n    \"output_range\": [\n      0.0,\n      1.0\n    ],\n    \"element_type\": \"float32\"\n  },\n  \"tiling\": {\n    \"alignment\": 1,\n    \"minimum\": 32,\n    \"recommended\": 256,\n    \"overlap\": 16,\n    \"window_size\": null,\n    \"static_shapes_required\": false\n  },\n  \"compatibility\": {\n    \"engine\": \"onnx-runtime\",\n    \"minimum_engine_version\": \"1.16.0\",\n    \"validated_providers\": [\n      \"cpu\",\n      \"directml\",\n      \"coreml\"\n    ],\n    \"validated_precisions\": [\n      \"fp32\"\n    ]\n  },\n  \"artifacts\": [\n    {\n      \"path\": \"artifacts/model.onnx\",\n      \"size_bytes\": 17939969,\n      \"sha256\": \"8db771cf05a8224e95438f99f5ab38eaef9b6c464dde0f6fecf6bce8a0b7fe71\"\n    }\n  ]\n}"
+    },
+    {
+      "id": "real-cugan-2x",
+      "version": "1.0.0",
+      "display_name": "Real-CUGAN 2x",
+      "family": "cugan",
+      "category": "anime",
+      "description": "Real-CUGAN anime super-resolution model 2x",
+      "license_spdx": "MIT",
+      "redistribution_review": "approved",
+      "size_bytes": 15204812,
+      "sha256": "d571a66079bd08d25ab678f1be77a859ccc0d61ef3f39cfb4a5f8ae86f9ad999",
+      "manifest_sha256": "ae99893246821c5473efc5208ce184c089d7b39fc8e88d4a4ff325925226be0a",
+      "download_urls": [
+        "https://github.com/bilibili/ailab/releases/download/real-cugan-v1.0/real-cugan-2x.onnx"
+      ],
+      "signature": "229c69461567ee0e18ab3a41a1fcea57f128cf55402df52200a4671099391133f8e1bcf864dc4d3f717d06e982954e32be6c17331065c03c709499c4ad01ad04",
+      "native_scales": [
+        2
+      ],
+      "validated_providers": [
+        "cpu",
+        "directml"
+      ],
+      "variants": [
+        {
+          "id": "no-denoise",
+          "native_scale": 2,
+          "strength": "-1"
+        },
+        {
+          "id": "denoise-1",
+          "native_scale": 2,
+          "strength": "1"
+        },
+        {
+          "id": "denoise-2",
+          "native_scale": 2,
+          "strength": "2"
+        },
+        {
+          "id": "denoise-3",
+          "native_scale": 2,
+          "strength": "3"
+        }
+      ],
+      "manifest_template": "{\n  \"schema_version\": 1,\n  \"id\": \"real-cugan-2x\",\n  \"package_version\": \"1.0.0\",\n  \"display_name\": \"Real-CUGAN 2x\",\n  \"family\": \"cugan\",\n  \"category\": \"anime\",\n  \"description\": \"Real-CUGAN anime super-resolution model 2x\",\n  \"license\": {\n    \"spdx\": \"MIT\",\n    \"upstream_url\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"redistribution_review\": \"approved\"\n  },\n  \"provenance\": {\n    \"upstream_repository\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"upstream_revision\": \"v0.3.0\",\n    \"source_weight_name\": \"real-cugan-2x.pth\",\n    \"source_weight_sha256\": \"0000000000000000000000000000000000000000000000000000000000000000\",\n    \"export_recipe\": \"official-onnx-export\"\n  },\n  \"variants\": [\n    {\n      \"id\": \"no-denoise\",\n      \"native_scale\": 2,\n      \"strength\": \"-1\",\n      \"artifact\": \"artifacts/model.onnx\"\n    },\n    {\n      \"id\": \"denoise-1\",\n      \"native_scale\": 2,\n      \"strength\": \"1\",\n      \"artifact\": \"artifacts/model.onnx\"\n    },\n    {\n      \"id\": \"denoise-2\",\n      \"native_scale\": 2,\n      \"strength\": \"2\",\n      \"artifact\": \"artifacts/model.onnx\"\n    },\n    {\n      \"id\": \"denoise-3\",\n      \"native_scale\": 2,\n      \"strength\": \"3\",\n      \"artifact\": \"artifacts/model.onnx\"\n    }\n  ],\n  \"tensor\": {\n    \"input_name\": \"input\",\n    \"output_name\": \"output\",\n    \"layout\": \"NCHW\",\n    \"channels\": \"RGB\",\n    \"input_range\": [\n      0.0,\n      1.0\n    ],\n    \"output_range\": [\n      0.0,\n      1.0\n    ],\n    \"element_type\": \"float32\"\n  },\n  \"tiling\": {\n    \"alignment\": 1,\n    \"minimum\": 32,\n    \"recommended\": 256,\n    \"overlap\": 16,\n    \"window_size\": null,\n    \"static_shapes_required\": false\n  },\n  \"compatibility\": {\n    \"engine\": \"onnx-runtime\",\n    \"minimum_engine_version\": \"1.16.0\",\n    \"validated_providers\": [\n      \"cpu\",\n      \"directml\"\n    ],\n    \"validated_precisions\": [\n      \"fp32\"\n    ]\n  },\n  \"artifacts\": [\n    {\n      \"path\": \"artifacts/model.onnx\",\n      \"size_bytes\": 15204812,\n      \"sha256\": \"d571a66079bd08d25ab678f1be77a859ccc0d61ef3f39cfb4a5f8ae86f9ad999\"\n    }\n  ]\n}"
+    },
+    {
+      "id": "real-cugan-4x",
+      "version": "1.0.0",
+      "display_name": "Real-CUGAN 4x",
+      "family": "cugan",
+      "category": "anime",
+      "description": "Real-CUGAN anime super-resolution model 4x",
+      "license_spdx": "MIT",
+      "redistribution_review": "approved",
+      "size_bytes": 28145290,
+      "sha256": "4cf0daf632a6d5aa6b3dc3f5fb368d6e551e47647634664b9a670c6c6f098653",
+      "manifest_sha256": "0e0cdaa0aa9ca3ba167eb3af69859f684dd521820a77fcd1d160819fbed8e7c1",
+      "download_urls": [
+        "https://github.com/bilibili/ailab/releases/download/real-cugan-v1.0/real-cugan-4x.onnx"
+      ],
+      "signature": "fde1746932a5fc27b5faf18010402b4bdc1a01e4c13280a90f3ddd102c91b45a2f2d534226b0b22edd1ee23814c4d386c8c5eeb62e757fb33e114de10ad6c008",
+      "native_scales": [
+        4
+      ],
+      "validated_providers": [
+        "cpu",
+        "directml"
+      ],
+      "variants": [
+        {
+          "id": "no-denoise",
+          "native_scale": 4,
+          "strength": "-1"
+        },
+        {
+          "id": "denoise-3",
+          "native_scale": 4,
+          "strength": "3"
+        }
+      ],
+      "manifest_template": "{\n  \"schema_version\": 1,\n  \"id\": \"real-cugan-4x\",\n  \"package_version\": \"1.0.0\",\n  \"display_name\": \"Real-CUGAN 4x\",\n  \"family\": \"cugan\",\n  \"category\": \"anime\",\n  \"description\": \"Real-CUGAN anime super-resolution model 4x\",\n  \"license\": {\n    \"spdx\": \"MIT\",\n    \"upstream_url\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"redistribution_review\": \"approved\"\n  },\n  \"provenance\": {\n    \"upstream_repository\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"upstream_revision\": \"v0.3.0\",\n    \"source_weight_name\": \"real-cugan-4x.pth\",\n    \"source_weight_sha256\": \"0000000000000000000000000000000000000000000000000000000000000000\",\n    \"export_recipe\": \"official-onnx-export\"\n  },\n  \"variants\": [\n    {\n      \"id\": \"no-denoise\",\n      \"native_scale\": 4,\n      \"strength\": \"-1\",\n      \"artifact\": \"artifacts/model.onnx\"\n    },\n    {\n      \"id\": \"denoise-3\",\n      \"native_scale\": 4,\n      \"strength\": \"3\",\n      \"artifact\": \"artifacts/model.onnx\"\n    }\n  ],\n  \"tensor\": {\n    \"input_name\": \"input\",\n    \"output_name\": \"output\",\n    \"layout\": \"NCHW\",\n    \"channels\": \"RGB\",\n    \"input_range\": [\n      0.0,\n      1.0\n    ],\n    \"output_range\": [\n      0.0,\n      1.0\n    ],\n    \"element_type\": \"float32\"\n  },\n  \"tiling\": {\n    \"alignment\": 1,\n    \"minimum\": 32,\n    \"recommended\": 256,\n    \"overlap\": 16,\n    \"window_size\": null,\n    \"static_shapes_required\": false\n  },\n  \"compatibility\": {\n    \"engine\": \"onnx-runtime\",\n    \"minimum_engine_version\": \"1.16.0\",\n    \"validated_providers\": [\n      \"cpu\",\n      \"directml\"\n    ],\n    \"validated_precisions\": [\n      \"fp32\"\n    ]\n  },\n  \"artifacts\": [\n    {\n      \"path\": \"artifacts/model.onnx\",\n      \"size_bytes\": 28145290,\n      \"sha256\": \"4cf0daf632a6d5aa6b3dc3f5fb368d6e551e47647634664b9a670c6c6f098653\"\n    }\n  ]\n}"
+    },
+    {
+      "id": "real-hat-gan-4x",
+      "version": "1.0.0",
+      "display_name": "Real-HAT-GAN 4x",
+      "family": "hat",
+      "category": "photo",
+      "description": "Hybrid Attention Transformer 4x super-resolution model",
+      "license_spdx": "Apache-2.0",
+      "redistribution_review": "approved",
+      "size_bytes": 76483920,
+      "sha256": "d5a66dbcdd24414fb185a93f6709ba2bbcc82de29e6624182ad2f4e90a584c9f",
+      "manifest_sha256": "548c9442a6919ea23f5b687c99bc1953b58124e5e0284e28504789862556cea4",
+      "download_urls": [
+        "https://github.com/XPixelGroup/HAT/releases/download/v1.0/real-hat-gan-4x.onnx"
+      ],
+      "signature": "367013e46c47118634b6e5a8cb46875d5d63f8f8a2cb539eee78ea155ab6cb18228707d6290efd97711dac1aaa6dc5b8e8e8385020dcc99544f995e9dc3b8308",
+      "native_scales": [
+        4
+      ],
+      "validated_providers": [
+        "cpu",
+        "directml",
+        "cuda"
+      ],
+      "variants": [
+        {
+          "id": "default",
+          "native_scale": 4,
+          "strength": null
+        }
+      ],
+      "manifest_template": "{\n  \"schema_version\": 1,\n  \"id\": \"real-hat-gan-4x\",\n  \"package_version\": \"1.0.0\",\n  \"display_name\": \"Real-HAT-GAN 4x\",\n  \"family\": \"hat\",\n  \"category\": \"photo\",\n  \"description\": \"Hybrid Attention Transformer 4x super-resolution model\",\n  \"license\": {\n    \"spdx\": \"Apache-2.0\",\n    \"upstream_url\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"redistribution_review\": \"approved\"\n  },\n  \"provenance\": {\n    \"upstream_repository\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"upstream_revision\": \"v0.3.0\",\n    \"source_weight_name\": \"real-hat-gan-4x.pth\",\n    \"source_weight_sha256\": \"0000000000000000000000000000000000000000000000000000000000000000\",\n    \"export_recipe\": \"official-onnx-export\"\n  },\n  \"variants\": [\n    {\n      \"id\": \"default\",\n      \"native_scale\": 4,\n      \"strength\": null,\n      \"artifact\": \"artifacts/model.onnx\"\n    }\n  ],\n  \"tensor\": {\n    \"input_name\": \"input\",\n    \"output_name\": \"output\",\n    \"layout\": \"NCHW\",\n    \"channels\": \"RGB\",\n    \"input_range\": [\n      0.0,\n      1.0\n    ],\n    \"output_range\": [\n      0.0,\n      1.0\n    ],\n    \"element_type\": \"float32\"\n  },\n  \"tiling\": {\n    \"alignment\": 1,\n    \"minimum\": 32,\n    \"recommended\": 256,\n    \"overlap\": 16,\n    \"window_size\": null,\n    \"static_shapes_required\": false\n  },\n  \"compatibility\": {\n    \"engine\": \"onnx-runtime\",\n    \"minimum_engine_version\": \"1.16.0\",\n    \"validated_providers\": [\n      \"cpu\",\n      \"directml\",\n      \"cuda\"\n    ],\n    \"validated_precisions\": [\n      \"fp32\"\n    ]\n  },\n  \"artifacts\": [\n    {\n      \"path\": \"artifacts/model.onnx\",\n      \"size_bytes\": 76483920,\n      \"sha256\": \"d5a66dbcdd24414fb185a93f6709ba2bbcc82de29e6624182ad2f4e90a584c9f\"\n    }\n  ]\n}"
+    }
+  ],
+  "signature": "b4f4d2c7cfd768caf41ea0f9f357be5b88c049af4039cb1b0f25151c385133cfb5f8f40f91b252f54d0adeda052456a7073f39f0daf1f937589b2c8fe517bd0b"
+}

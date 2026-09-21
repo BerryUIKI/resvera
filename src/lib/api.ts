@@ -3,6 +3,7 @@ import {
   AppSettings,
   JobHistoryPage,
   JobSnapshot,
+  ModelInstallProgress,
   ModelSummary,
   QueueSnapshot,
   RuntimeStatus,
@@ -306,6 +307,52 @@ export async function uninstallModel(modelId: string): Promise<boolean> {
   }
   // Browser stub: nothing to delete.
   return false;
+}
+
+/**
+ * Cancel an ongoing model download/installation.
+ */
+export async function cancelModelInstall(modelId: string): Promise<boolean> {
+  if (isTauri()) {
+    return await invoke<boolean>("cancel_model_install", { modelId });
+  }
+  return false;
+}
+
+/**
+ * Get current progress for an active model download.
+ */
+export async function getModelInstallProgress(modelId: string): Promise<ModelInstallProgress | null> {
+  if (isTauri()) {
+    return await invoke<ModelInstallProgress | null>("get_model_install_progress", { modelId });
+  }
+  return null;
+}
+
+/**
+ * Open file picker to choose an ONNX model file (.onnx).
+ */
+export async function pickModelFile(): Promise<string | null> {
+  if (isTauri()) {
+    return await invoke<string | null>("pick_model_file");
+  }
+  return null;
+}
+
+/**
+ * Import a local ONNX model file into the models directory.
+ */
+export async function importModelFile(path: string, modelId: string): Promise<ModelSummary> {
+  if (isTauri()) {
+    return await invoke<ModelSummary>("import_model_file", { path, modelId });
+  }
+  const all = await listModels();
+  const found = all.find((m) => m.id === modelId);
+  if (found) {
+    found.installed = true;
+    return found;
+  }
+  throw new Error(`Model '${modelId}' not found in catalog.`);
 }
 
 /**

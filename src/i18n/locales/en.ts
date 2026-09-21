@@ -175,5 +175,8 @@ export const en = {
     localPath: "Installed to",
     securityGuarantee: "Staged downloads always verify SHA-256 and Ed25519 signature before activation.",
     offlineInstallationNote: "For offline installation, place verified .tar.zst packages in the storage path.",
+    importLocal: "Import ONNX File",
+    cancelDownload: "Cancel Download",
+    importSuccess: "Model imported and verified successfully.",
   },
 };
