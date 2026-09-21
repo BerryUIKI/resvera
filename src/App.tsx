@@ -15,6 +15,7 @@ import {
   resumeQueue,
   getQueue,
   saveSettings,
+  retryJob,
   installModel,
   uninstallModel,
   pickImages,
@@ -249,57 +250,60 @@ export const App: Component = () => {
     return { kind: "png" };
   };
 
-  const handleStartUpscale = async (specificJobId?: string) => {
+  const handleRetryOriginal = async (jobId: string) => {
     if (!isTauri()) return;
+    try {
+      const retried = await retryJob(jobId);
+      if (retried) {
+        setSelectedJobId(retried.id);
+      }
+    } catch (err: any) {
+      console.error("Failed to retry job:", err);
+      alert(err?.message || String(err));
+    }
+    if (isPaused()) {
+      try {
+        await resumeQueue();
+        setIsPaused(false);
+      } catch (err) {
+        console.warn("Failed to resume queue:", err);
+      }
+    }
+    await syncQueueState();
+  };
 
+  const handleRerunWithCurrentSettings = async (jobId: string) => {
+    if (!isTauri()) return;
+    const targetJob = jobs().find((j) => j.id === jobId);
+    if (!targetJob) return;
+
+    if (["queued", "preparing", "running", "finalizing"].includes(targetJob.state)) {
+      alert("Job is currently active. Cancel it before re-running.");
+      return;
+    }
+
+    const targetOutDir = customOutputDir().trim() || settings().outputDirectory || "";
     const effFormat = getEffectiveOutputFormat();
     const effOverwrite = overwrite();
     const effTileSize = selectedTileSize();
     const effProvider = selectedProvider() === "automatic" ? null : selectedProvider();
 
-    if (specificJobId) {
-      setSelectedJobId(specificJobId);
-      const targetJob = jobs().find((j) => j.id === specificJobId);
-      if (targetJob && targetJob.state !== "running" && targetJob.state !== "queued") {
-        const targetOutDir = customOutputDir().trim() || settings().outputDirectory || "";
-        try {
-          const created = await createUpscaleJob({
-            inputPath: targetJob.inputPath,
-            outputDirectory: targetOutDir,
-            modelId: selectedModelId(),
-            modelVariantId: selectedVariantId(),
-            targetScale: targetScale(),
-            outputFormat: effFormat,
-            overwrite: effOverwrite,
-            tileSize: effTileSize,
-            providerPreference: effProvider,
-          });
-          setSelectedJobId(created.id);
-        } catch (err) {
-          console.error("Failed to re-queue job:", err);
-        }
-      }
-    } else {
-      const cur = currentJob();
-      if (cur && cur.state !== "running" && cur.state !== "queued") {
-        const targetOutDir = customOutputDir().trim() || settings().outputDirectory || "";
-        try {
-          const created = await createUpscaleJob({
-            inputPath: cur.inputPath,
-            outputDirectory: targetOutDir,
-            modelId: selectedModelId(),
-            modelVariantId: selectedVariantId(),
-            targetScale: targetScale(),
-            outputFormat: effFormat,
-            overwrite: effOverwrite,
-            tileSize: effTileSize,
-            providerPreference: effProvider,
-          });
-          setSelectedJobId(created.id);
-        } catch (err) {
-          console.error("Failed to submit job:", err);
-        }
-      }
+    try {
+      const created = await createUpscaleJob({
+        inputPath: targetJob.inputPath,
+        outputDirectory: targetOutDir,
+        modelId: selectedModelId(),
+        modelVariantId: selectedVariantId(),
+        targetScale: targetScale(),
+        outputFormat: effFormat,
+        overwrite: effOverwrite,
+        tileSize: effTileSize,
+        providerPreference: effProvider,
+      });
+      setSelectedJobId(created.id);
+    } catch (err: any) {
+      console.error("Failed to rerun job with current settings:", err);
+      alert(err?.message || String(err));
     }
 
     if (isPaused()) {
@@ -518,7 +522,7 @@ export const App: Component = () => {
             selectedJobId={selectedJobId()}
             onSelectJob={setSelectedJobId}
             onCancelJob={handleCancelJob}
-            onStartJob={handleStartUpscale}
+            onRetryJob={handleRetryOriginal}
             isPaused={isPaused()}
             onTogglePause={handleTogglePause}
           />
@@ -569,17 +573,34 @@ export const App: Component = () => {
               </div>
 
               <div class="flex items-center space-x-2">
-                <Show when={currentJob()?.state !== "running"}>
+                {/* When job is active, show Cancel */}
+                <Show when={["queued", "preparing", "running", "finalizing"].includes(currentJob()?.state || "")}>
                   <button
-                    onClick={() => handleStartUpscale(currentJob()?.id)}
-                    class="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-lg shadow-md shadow-emerald-500/20 transition cursor-pointer"
+                    onClick={() => currentJob() && handleCancelJob(currentJob()!.id)}
+                    class="flex items-center space-x-1.5 px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-semibold text-xs rounded-lg border border-rose-600/50 shadow-sm transition cursor-pointer"
+                  >
+                    <span>✕</span>
+                    <span>{t("queue.cancel")}</span>
+                  </button>
+                </Show>
+
+                {/* When job is in terminal state, show Retry (Original) and Rerun (Current) */}
+                <Show when={["succeeded", "failed", "cancelled", "interrupted"].includes(currentJob()?.state || "")}>
+                  <button
+                    onClick={() => currentJob() && handleRetryOriginal(currentJob()!.id)}
+                    class="flex items-center space-x-1.5 px-3 py-1.5 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs rounded-lg shadow-md shadow-sky-500/20 transition cursor-pointer"
+                    title={t("controls.retryOriginal")}
+                  >
+                    <span>↻</span>
+                    <span>{t("controls.retryOriginal")}</span>
+                  </button>
+                  <button
+                    onClick={() => currentJob() && handleRerunWithCurrentSettings(currentJob()!.id)}
+                    class="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-lg border border-slate-700 shadow-sm transition cursor-pointer"
+                    title={t("controls.retryCurrent")}
                   >
                     <span>⚡</span>
-                    <span>
-                      {currentJob()?.state === "succeeded"
-                        ? t("controls.rerun")
-                        : t("controls.upscaleCurrent")}
-                    </span>
+                    <span>{t("controls.retryCurrent")}</span>
                   </button>
                 </Show>
               </div>
@@ -1011,23 +1032,22 @@ export const App: Component = () => {
 
           {/* Action Buttons */}
           <div class="space-y-2.5 pt-4 border-t border-slate-800 mt-4">
-            <Show when={jobs().length > 0}>
+            <Show when={queuedCount() > 0 || isProcessingQueue()}>
               <button
-                onClick={() => handleStartUpscale()}
-                disabled={isProcessingQueue()}
-                class={`w-full flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-bold text-xs shadow-lg transition ${
-                  isProcessingQueue()
-                    ? "bg-sky-600/50 text-slate-400 cursor-not-allowed"
-                    : "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20 cursor-pointer"
+                onClick={handleTogglePause}
+                class={`w-full flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-bold text-xs shadow-lg transition cursor-pointer ${
+                  isPaused()
+                    ? "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20"
+                    : "bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20"
                 }`}
               >
-                <span>⚡</span>
+                <span>{isPaused() ? "▶" : "⏸"}</span>
                 <span>
-                  {isProcessingQueue()
-                    ? t("queue.processing")
-                    : queuedCount() > 0
-                    ? `${t("controls.upscaleAll")} (${queuedCount()})`
-                    : t("controls.upscaleCurrent")}
+                  {isPaused()
+                    ? `${t("queue.resume")} (${queuedCount()})`
+                    : isProcessingQueue()
+                    ? `${t("queue.pause")} (${queuedCount() > 0 ? queuedCount() : 1})`
+                    : `${t("queue.pause")} (${queuedCount()})`}
                 </span>
               </button>
             </Show>

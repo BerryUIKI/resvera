@@ -256,6 +256,16 @@ impl AppDatabase {
         Ok(affected == 1)
     }
 
+    pub fn has_active_job_for_input(&self, input_path: &str) -> Result<bool, DatabaseError> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM jobs WHERE input_path = ?1 AND state IN ('queued', 'preparing', 'running', 'finalizing')",
+            params![input_path],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
     pub fn update_job_failure(
         &self,
         id: &str,

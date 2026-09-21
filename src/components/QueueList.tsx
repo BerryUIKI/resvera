@@ -7,7 +7,7 @@ interface QueueListProps {
   selectedJobId: string | null;
   onSelectJob: (id: string) => void;
   onCancelJob: (id: string) => void;
-  onStartJob?: (id: string) => void;
+  onRetryJob?: (id: string) => void;
   isPaused: boolean;
   onTogglePause: () => void;
 }
@@ -70,19 +70,8 @@ export const QueueList: Component<QueueListProps> = (props) => {
 
               <div class="flex items-center space-x-1.5">
                 {getStatusBadge(job.state)}
-                {job.state !== "running" && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      props.onStartJob?.(job.id);
-                    }}
-                    class="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/60 p-1 rounded transition text-xs"
-                    title={t("controls.upscaleCurrent")}
-                  >
-                    ▶
-                  </button>
-                )}
-                {(job.state === "queued" || job.state === "running") && (
+                {/* Active / In-flight: allow cancellation */}
+                {["queued", "preparing", "running", "finalizing"].includes(job.state) && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -92,6 +81,19 @@ export const QueueList: Component<QueueListProps> = (props) => {
                     title={t("queue.cancel")}
                   >
                     ✕
+                  </button>
+                )}
+                {/* Terminal states: allow retry with original parameters */}
+                {["succeeded", "failed", "cancelled", "interrupted"].includes(job.state) && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      props.onRetryJob?.(job.id);
+                    }}
+                    class="text-slate-400 hover:text-sky-400 hover:bg-sky-950/60 p-1 rounded transition text-xs font-bold"
+                    title={t("controls.retryOriginal")}
+                  >
+                    ↻
                   </button>
                 )}
               </div>

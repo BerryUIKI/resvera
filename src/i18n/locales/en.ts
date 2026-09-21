@@ -59,6 +59,8 @@ export const en = {
     upscaleAll: "Start Processing",
     upscaleCurrent: "Upscale Selected Image",
     rerun: "Re-run Upscale",
+    retryOriginal: "Retry (Original Settings)",
+    retryCurrent: "Retry (Current Settings)",
     provider: "Execution Provider",
     precision: "Inference Precision",
     tileSize: "Tile Size",

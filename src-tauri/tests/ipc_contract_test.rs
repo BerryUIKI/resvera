@@ -669,3 +669,69 @@ fn test_stage_input_image_validation_and_staging() {
     let read_back = std::fs::read(&staged_path).unwrap();
     assert_eq!(read_back, sample_bytes);
 }
+
+#[test]
+fn test_retry_job_ipc_workflow_and_active_state_rejection() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(OrtEngine::with_provider("cpu"));
+    let models_root = temp.path().join("models");
+    install_test_model(&models_root);
+    let orchestrator = resvera_core::JobOrchestrator::with_models_root(
+        db,
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    );
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(models_root)),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path: temp.path().join("settings.json"),
+        staging_dir: temp.path().join("staging"),
+    };
+
+    let input_path = temp.path().join("sample.png");
+    let img = image::RgbImage::new(16, 16);
+    atomic_save_image(&img, &input_path, &OutputFormat::Png, None).unwrap();
+
+    let req = CoreJobRequest {
+        input_path: input_path.to_str().unwrap().to_string(),
+        output_directory: temp.path().to_str().unwrap().to_string(),
+        model_id: "realesrgan-x4plus".to_string(),
+        model_variant_id: "default".to_string(),
+        target_scale: 4,
+        output_format: OutputFormat::Png,
+        overwrite: false,
+        tile_size: Some(128),
+        provider_preference: Some("cpu".to_string()),
+    };
+
+    // 1. Submit initial job
+    let snap1 = create_upscale_job_impl(&state, req.clone()).unwrap();
+    assert_eq!(snap1.state, "queued");
+
+    // 2. Cannot submit duplicate active job for same input
+    let dup_err = create_upscale_job_impl(&state, req.clone()).unwrap_err();
+    assert_eq!(dup_err.code, ErrorCode::InvalidArgument);
+
+    // 3. Cannot retry an active job
+    let retry_active_err = retry_job_impl(&state, &snap1.id).unwrap_err();
+    assert_eq!(retry_active_err.code, ErrorCode::InvalidArgument);
+
+    // 4. Process job to completion (dummy ONNX model truthfully fails execution)
+    let completed = state.orchestrator.process_next_job().unwrap().unwrap();
+    assert_eq!(completed.state, "failed");
+
+    // 5. Retry failed job via IPC command
+    let retried = retry_job_impl(&state, &snap1.id).unwrap();
+    assert_ne!(retried.id, snap1.id);
+    assert_eq!(retried.state, "queued");
+    assert_eq!(retried.model_id, "realesrgan-x4plus");
+    assert_eq!(retried.target_scale, 4);
+    assert_eq!(retried.input_path, snap1.input_path);
+
+    // 6. Cancel the retried job
+    let cancelled = cancel_job_impl(&state, &retried.id).unwrap();
+    assert_eq!(cancelled.state, "cancelled");
+}
