@@ -607,9 +607,17 @@ fn test_stage_input_image_validation_and_staging() {
     let empty_err = stage_input_image_impl(&state, "photo.png".into(), vec![]).unwrap_err();
     assert_eq!(empty_err.code, ErrorCode::InvalidArgument);
 
-    // 2. Rejects unsupported extensions
+    // 2. Rejects unsupported extensions and formats
     let ext_err = stage_input_image_impl(&state, "malware.exe".into(), vec![1, 2, 3]).unwrap_err();
     assert_eq!(ext_err.code, ErrorCode::UnsupportedFormat);
+
+    let bmp_err =
+        stage_input_image_impl(&state, "test.bmp".into(), vec![0x42, 0x4D, 0, 0]).unwrap_err();
+    assert_eq!(bmp_err.code, ErrorCode::UnsupportedFormat);
+
+    let fake_png_err =
+        stage_input_image_impl(&state, "fake.png".into(), vec![1, 2, 3, 4]).unwrap_err();
+    assert_eq!(fake_png_err.code, ErrorCode::UnsupportedFormat);
 
     // 3. Successfully stages image and sanitizes traversal in file_name
     let sample_bytes = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]; // PNG header

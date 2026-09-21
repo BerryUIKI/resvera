@@ -676,13 +676,33 @@ pub fn stage_input_image_impl(
         .map(|e| e.to_lowercase())
         .unwrap_or_else(|| "png".to_string());
 
-    if !["png", "jpg", "jpeg", "webp", "bmp"].contains(&ext.as_str()) {
+    if !["png", "jpg", "jpeg", "webp"].contains(&ext.as_str()) {
         return Err(ApiError {
             code: ErrorCode::UnsupportedFormat,
             message: format!("Unsupported file extension: .{}", ext),
             details: None,
             retryable: false,
         });
+    }
+
+    let guessed = image::guess_format(&data).map_err(|e| ApiError {
+        code: ErrorCode::UnsupportedFormat,
+        message: format!("Failed to determine image format: {e}"),
+        details: None,
+        retryable: false,
+    })?;
+    match guessed {
+        image::ImageFormat::Png | image::ImageFormat::Jpeg | image::ImageFormat::WebP => {}
+        _ => {
+            return Err(ApiError {
+                code: ErrorCode::UnsupportedFormat,
+                message: format!(
+                    "Image format {guessed:?} is unsupported. Only PNG, JPEG, and WebP are accepted."
+                ),
+                details: None,
+                retryable: false,
+            });
+        }
     }
 
     let staged_file_name = format!("{}_{}", uuid::Uuid::new_v4(), clean_name);
@@ -728,9 +748,7 @@ pub fn pick_images_impl() -> Result<Vec<String>, ApiError> {
     let files = rfd::FileDialog::new()
         .add_filter(
             "Image",
-            &[
-                "png", "jpg", "jpeg", "webp", "bmp", "PNG", "JPG", "JPEG", "WEBP", "BMP",
-            ],
+            &["png", "jpg", "jpeg", "webp", "PNG", "JPG", "JPEG", "WEBP"],
         )
         .set_title("Select Images to Upscale")
         .pick_files();
@@ -1283,7 +1301,6 @@ pub fn read_image_data(path: String) -> Result<String, ApiError> {
     let mime = match ext.as_str() {
         "jpg" | "jpeg" => "image/jpeg",
         "webp" => "image/webp",
-        "bmp" => "image/bmp",
         _ => "image/png",
     };
 
