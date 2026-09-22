@@ -31,6 +31,11 @@ impl QueueWorker {
 
                     match worker_state.orchestrator.process_next_job() {
                         Ok(Some(completed_job)) => {
+                            if let Some(out_path) = &completed_job.output_path {
+                                worker_state
+                                    .preview_scope
+                                    .allow_file(std::path::Path::new(out_path));
+                            }
                             info!(
                                 job_id = %completed_job.id,
                                 state = %completed_job.state,

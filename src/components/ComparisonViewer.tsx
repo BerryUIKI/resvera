@@ -29,9 +29,12 @@ export const ComparisonViewer: Component<ComparisonViewerProps> = (props) => {
 
   let imageContainerRef: HTMLDivElement | undefined;
 
-  // Reset pan and zoom when image changes
+  let lastFailedBeforeUrl: string | null = null;
+  let lastFailedAfterUrl: string | null = null;
+
   createEffect(() => {
     const raw = props.beforeUrl;
+    lastFailedBeforeUrl = null;
     if (!raw) {
       setBeforeSrc(null);
       setZoom(1);
@@ -46,6 +49,7 @@ export const ComparisonViewer: Component<ComparisonViewerProps> = (props) => {
 
   createEffect(() => {
     const raw = props.afterUrl;
+    lastFailedAfterUrl = null;
     if (!raw) {
       setAfterSrc(null);
       return;
@@ -56,24 +60,26 @@ export const ComparisonViewer: Component<ComparisonViewerProps> = (props) => {
 
   const handleBeforeError = async () => {
     const raw = props.beforeUrl;
-    if (raw && !raw.startsWith("data:") && !raw.startsWith("blob:")) {
+    if (raw && raw !== lastFailedBeforeUrl && !raw.startsWith("data:") && !raw.startsWith("blob:")) {
+      lastFailedBeforeUrl = raw;
       try {
         const b64 = await readImageData(raw);
         setBeforeSrc(b64);
       } catch (e) {
-        console.warn("Failed to load before image via IPC:", e);
+        console.warn("Failed to load before image via IPC fallback:", e);
       }
     }
   };
 
   const handleAfterError = async () => {
     const raw = props.afterUrl;
-    if (raw && !raw.startsWith("data:") && !raw.startsWith("blob:")) {
+    if (raw && raw !== lastFailedAfterUrl && !raw.startsWith("data:") && !raw.startsWith("blob:")) {
+      lastFailedAfterUrl = raw;
       try {
         const b64 = await readImageData(raw);
         setAfterSrc(b64);
       } catch (e) {
-        console.warn("Failed to load after image via IPC:", e);
+        console.warn("Failed to load after image via IPC fallback:", e);
       }
     }
   };
