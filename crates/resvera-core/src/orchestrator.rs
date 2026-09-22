@@ -3,9 +3,10 @@ use crate::adapter::{
 };
 use crate::engine::{CancellationToken, EngineError, InferenceEngine};
 use crate::pipeline::atomic::{
-    atomic_save_image, atomic_save_image_with_alpha, generate_output_path,
+    atomic_save_image, atomic_save_image_with_metadata, generate_output_path,
 };
 use crate::pipeline::io::{load_image_with_alpha, OutputFormat};
+use crate::pipeline::metadata::MetadataPolicy;
 use crate::pipeline::naming::strip_verbatim_prefix;
 use crate::pipeline::resample::{downsample_lanczos3, resample_rgb_lanczos3};
 use crate::pipeline::tiling::{BlendMode, TileBlender, TilePlan};
@@ -96,6 +97,7 @@ pub struct JobOrchestrator {
     active_job_id: Arc<Mutex<Option<String>>>,
     active_cancel_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
     pub staging_dir: Arc<RwLock<Option<PathBuf>>>,
+    pub metadata_policy: Arc<RwLock<MetadataPolicy>>,
 }
 
 impl JobOrchestrator {
@@ -126,6 +128,7 @@ impl JobOrchestrator {
             active_job_id: Arc::new(Mutex::new(None)),
             active_cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
             staging_dir: Arc::new(RwLock::new(None)),
+            metadata_policy: Arc::new(RwLock::new(MetadataPolicy::default())),
         }
     }
 
@@ -136,6 +139,19 @@ impl JobOrchestrator {
 
     pub fn set_staging_dir<P: AsRef<Path>>(&self, staging_dir: P) {
         *self.staging_dir.write().unwrap() = Some(staging_dir.as_ref().to_path_buf());
+    }
+
+    pub fn metadata_policy(&self) -> MetadataPolicy {
+        *self.metadata_policy.read().unwrap()
+    }
+
+    pub fn set_metadata_policy(&self, policy: MetadataPolicy) {
+        *self.metadata_policy.write().unwrap() = policy;
+    }
+
+    pub fn with_metadata_policy(self, policy: MetadataPolicy) -> Self {
+        self.set_metadata_policy(policy);
+        self
     }
 
     pub fn pause_queue(&self) {
@@ -727,13 +743,15 @@ impl JobOrchestrator {
             job.naming_template.as_deref(),
         );
 
-        // Atomic file write with alpha channel
-        atomic_save_image_with_alpha(
+        // Atomic file write with alpha channel and metadata policy
+        atomic_save_image_with_metadata(
             &output_img,
             output_alpha.as_ref(),
             &target_path,
             &output_format,
             Some(Path::new(&job.input_path)),
+            Some(&loaded_input.metadata),
+            &self.metadata_policy(),
         )?;
         if let Err(error) = cancel.check() {
             let _ = std::fs::remove_file(&target_path);

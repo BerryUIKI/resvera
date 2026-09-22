@@ -148,11 +148,14 @@ flowchart LR
     Atomic --> Preview[Generate cache-scoped preview]
 ```
 
-### 4.1 Image Formats
+### 4.1 Image Formats and Metadata Handling
 
-The Rust image pipeline, not the model runtime, owns file-format support. Every supported input is decoded into a normalized in-memory RGB/RGBA representation before inference. Model tensors never depend on the source container format.
+The Rust image pipeline, not the model runtime, owns file-format support and metadata handling. Every supported input is decoded into a normalized in-memory RGB/RGBA representation before inference. Model tensors never depend on the source container format.
 
-The initial required formats are PNG, JPEG, and WebP. Additional formats must be enabled only after decode, encode, alpha, bit-depth, and metadata behavior are covered by tests.
+The initial required formats are PNG, JPEG, and WebP. Metadata preservation operates according to the configured `MetadataPolicy` (`PreserveSafe`, `StripAll`, `PreserveAll`):
+- **Orientation Normalization**: Input orientation (EXIF tag `0x0112`) is applied directly to pixel memory via `DynamicImage::apply_orientation`. When outputting EXIF metadata, the orientation tag is rewritten to `1` (`Normal` / no transforms) so downstream image decoders do not rotate or flip the processed output again.
+- **Color Profiles & EXIF**: JPEG and PNG outputs preserve ICC color profiles and sanitized EXIF chunks. Under `PreserveSafe`, GPS SubIFDs and tags are stripped from EXIF and XMP data.
+- **WebP Limitations**: Due to limitations in the pure-Rust WebP encoder (`image::codecs::webp`), metadata (EXIF/ICC) embedding is not currently supported for WebP outputs. WebP outputs contain processed image pixels with alpha support. Applications requiring guaranteed EXIF or ICC retention should specify JPEG or PNG.
 
 ### 4.2 Tiling
 

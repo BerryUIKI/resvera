@@ -1,5 +1,6 @@
 use crate::adapter::PipelineError;
-use crate::pipeline::io::{save_image_with_alpha, OutputFormat};
+use crate::pipeline::io::{save_image_with_metadata, OutputFormat};
+use crate::pipeline::metadata::{MetadataPolicy, RawImageMetadata};
 use crate::pipeline::naming::sanitize_filename_component;
 use image::RgbImage;
 use std::fs;
@@ -76,6 +77,26 @@ pub fn atomic_save_image_with_alpha(
     format: &OutputFormat,
     original_input_path: Option<&Path>,
 ) -> Result<(), PipelineError> {
+    atomic_save_image_with_metadata(
+        img,
+        alpha,
+        target_path,
+        format,
+        original_input_path,
+        None,
+        &MetadataPolicy::default(),
+    )
+}
+
+pub fn atomic_save_image_with_metadata(
+    img: &RgbImage,
+    alpha: Option<&image::GrayImage>,
+    target_path: &Path,
+    format: &OutputFormat,
+    original_input_path: Option<&Path>,
+    metadata: Option<&RawImageMetadata>,
+    policy: &MetadataPolicy,
+) -> Result<(), PipelineError> {
     if let Some(parent) = target_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -83,7 +104,15 @@ pub fn atomic_save_image_with_alpha(
     let tmp_path = target_path.with_extension(format!("tmp.{}", uuid::Uuid::new_v4()));
 
     // Save to a sibling temporary file so the final rename stays on one filesystem.
-    if let Err(error) = save_image_with_alpha(img, alpha, &tmp_path, format, original_input_path) {
+    if let Err(error) = save_image_with_metadata(
+        img,
+        alpha,
+        &tmp_path,
+        format,
+        original_input_path,
+        metadata,
+        policy,
+    ) {
         let _ = fs::remove_file(&tmp_path);
         return Err(error);
     }

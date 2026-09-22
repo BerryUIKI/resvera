@@ -1,8 +1,11 @@
 use crate::adapter::PipelineError;
+use crate::pipeline::metadata::{MetadataPolicy, RawImageMetadata};
 use image::codecs::jpeg::JpegEncoder;
+use image::codecs::png::PngEncoder;
 use image::codecs::webp::WebPEncoder;
 use image::{
-    ExtendedColorType, GrayImage, ImageDecoder, ImageFormat, ImageReader, RgbImage, RgbaImage,
+    ExtendedColorType, GrayImage, ImageDecoder, ImageEncoder, ImageFormat, ImageReader, RgbImage,
+    RgbaImage,
 };
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -22,6 +25,7 @@ pub enum OutputFormat {
 pub struct LoadedImage {
     pub rgb: RgbImage,
     pub alpha: Option<GrayImage>,
+    pub metadata: RawImageMetadata,
 }
 
 pub fn load_image<P: AsRef<Path>>(path: P) -> Result<RgbImage, PipelineError> {
@@ -35,6 +39,12 @@ pub fn load_image_with_alpha<P: AsRef<Path>>(path: P) -> Result<LoadedImage, Pip
     let orientation = decoder
         .orientation()
         .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let orientation_was_applied = orientation != image::metadata::Orientation::NoTransforms;
+
+    let icc_profile = decoder.icc_profile().ok().flatten();
+    let exif = decoder.exif_metadata().ok().flatten();
+    let xmp = decoder.xmp_metadata().ok().flatten();
+
     let mut dyn_img = image::DynamicImage::from_decoder(decoder)?;
     dyn_img.apply_orientation(orientation);
 
@@ -62,7 +72,17 @@ pub fn load_image_with_alpha<P: AsRef<Path>>(path: P) -> Result<LoadedImage, Pip
     };
 
     let rgb = dyn_img.to_rgb8();
-    Ok(LoadedImage { rgb, alpha })
+    let metadata = RawImageMetadata {
+        icc_profile,
+        exif,
+        xmp,
+        orientation_was_applied,
+    };
+    Ok(LoadedImage {
+        rgb,
+        alpha,
+        metadata,
+    })
 }
 
 pub fn save_image<P: AsRef<Path>>(
@@ -80,6 +100,26 @@ pub fn save_image_with_alpha<P: AsRef<Path>>(
     path: P,
     format: &OutputFormat,
     original_input_path: Option<&Path>,
+) -> Result<(), PipelineError> {
+    save_image_with_metadata(
+        rgb,
+        alpha,
+        path,
+        format,
+        original_input_path,
+        None,
+        &MetadataPolicy::default(),
+    )
+}
+
+pub fn save_image_with_metadata<P: AsRef<Path>>(
+    rgb: &RgbImage,
+    alpha: Option<&GrayImage>,
+    path: P,
+    format: &OutputFormat,
+    original_input_path: Option<&Path>,
+    metadata: Option<&RawImageMetadata>,
+    policy: &MetadataPolicy,
 ) -> Result<(), PipelineError> {
     let path = path.as_ref();
     let file = File::create(path)?;
@@ -125,12 +165,24 @@ pub fn save_image_with_alpha<P: AsRef<Path>>(
         _ => None,
     };
 
+    let sanitized = metadata.map(|m| m.sanitize_for_output(policy));
+
     match effective_format {
         ImageFormat::Png => {
+            let mut encoder = PngEncoder::new(&mut writer);
+            if let Some(ref meta) = sanitized {
+                if let Some(ref icc) = meta.icc_profile {
+                    let _ = encoder.set_icc_profile(icc.clone());
+                }
+                if let Some(ref exif) = meta.exif {
+                    let _ = encoder.set_exif_metadata(exif.clone());
+                }
+            }
+
             if let Some(ref rgba) = rgba_opt {
-                rgba.write_to(&mut writer, ImageFormat::Png)?;
+                encoder.write_image(rgba.as_raw(), w, h, ExtendedColorType::Rgba8)?;
             } else {
-                rgb.write_to(&mut writer, ImageFormat::Png)?;
+                encoder.write_image(rgb.as_raw(), w, h, ExtendedColorType::Rgb8)?;
             }
         }
         ImageFormat::Jpeg => {
@@ -139,7 +191,15 @@ pub fn save_image_with_alpha<P: AsRef<Path>>(
                 _ => 90,
             };
             let mut encoder = JpegEncoder::new_with_quality(&mut writer, quality);
-            encoder.encode(rgb.as_raw(), w, h, ExtendedColorType::Rgb8)?;
+            if let Some(ref meta) = sanitized {
+                if let Some(ref icc) = meta.icc_profile {
+                    let _ = encoder.set_icc_profile(icc.clone());
+                }
+                if let Some(ref exif) = meta.exif {
+                    let _ = encoder.set_exif_metadata(exif.clone());
+                }
+            }
+            encoder.write_image(rgb.as_raw(), w, h, ExtendedColorType::Rgb8)?;
         }
         ImageFormat::WebP => {
             if let OutputFormat::Webp {
