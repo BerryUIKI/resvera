@@ -1,6 +1,9 @@
-use resvera_core::{atomic_save_image, OutputFormat, UpscaleJobRequest as CoreJobRequest};
+use resvera_core::{
+    atomic_save_image, JobOrchestrator, OutputFormat, UpscaleJobRequest as CoreJobRequest,
+};
 use resvera_desktop::commands::*;
 use resvera_desktop::ipc_types::*;
+use resvera_desktop::preview_scope::PreviewScope;
 use resvera_desktop::worker::QueueWorker;
 use resvera_engine_ort::OrtEngine;
 use resvera_models::{compute_file_sha256, ModelInstaller};
@@ -73,6 +76,7 @@ fn test_ipc_commands_workflow() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     // 1. Get runtime status
@@ -168,6 +172,7 @@ fn test_settings_transactional_failure_does_not_mutate_in_memory() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     let mut modified = initial.clone();
@@ -283,6 +288,7 @@ fn test_background_queue_worker_execution() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     let input_path = temp.path().join("worker_photo.png");
@@ -458,6 +464,7 @@ fn test_uninstall_model_success_and_validation() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     // Verify model is initially installed
@@ -566,6 +573,7 @@ async fn test_install_model_success_and_validation() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     // Initially not installed
@@ -646,6 +654,7 @@ fn test_save_settings_dynamic_models_root() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     // Initially uses root_a where model is installed
@@ -694,6 +703,7 @@ fn test_stage_input_image_validation_and_staging() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     // 1. Rejects empty data
@@ -755,6 +765,7 @@ fn test_retry_job_ipc_workflow_and_active_state_rejection() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     let input_path = temp.path().join("sample.png");
@@ -840,6 +851,7 @@ fn test_coordinated_application_shutdown() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     let in_path = temp.path().join("shutdown_input.png");
@@ -907,6 +919,7 @@ fn test_job_history_bounded_cursor_pagination_workflow() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     // Insert 5 completed jobs with deterministic timestamps into DB
@@ -988,6 +1001,7 @@ fn test_job_history_validation_and_bounds() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     // 1. Limit = 0 must be rejected with validation error
@@ -1033,6 +1047,7 @@ fn test_streaming_staging_upload_lifecycle() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     // 1. Start upload session
@@ -1099,6 +1114,7 @@ fn test_staging_disk_leak_prevention_on_job_completion() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     // Stage an image
@@ -1182,6 +1198,7 @@ fn test_database_failure_returns_typed_storage_failure_ipc_error() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     // Verify healthy queue returns Ok
@@ -1229,6 +1246,7 @@ fn test_load_settings_malformed_json_preserves_corrupt_file_and_errors() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     let result = load_settings_impl(&state);
@@ -1279,6 +1297,7 @@ fn test_load_settings_incompatible_schema_version_preserves_file_and_errors() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     let result = load_settings_impl(&state);
@@ -1338,6 +1357,7 @@ fn test_load_settings_v0_migration_success() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     let loaded = load_settings_impl(&state).unwrap();
@@ -1384,6 +1404,7 @@ fn test_save_settings_fails_on_uncreatable_models_dir() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     let mut invalid_settings = initial.clone();
@@ -1431,6 +1452,7 @@ async fn test_install_model_e2e_and_execution() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     let has_fixture = [
@@ -1512,6 +1534,7 @@ async fn test_cancel_model_install_and_sweep() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     // Test cancel_model_install on non-active returns false
@@ -1544,6 +1567,7 @@ async fn test_import_model_file_flow() {
         staging_sessions: Arc::new(Mutex::new(HashMap::new())),
         active_installs: Arc::new(Mutex::new(HashMap::new())),
         install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope: Arc::new(PreviewScope::default()),
     };
 
     // Create a dummy file with wrong hash to verify hash rejection
@@ -1580,4 +1604,102 @@ async fn test_import_model_file_flow() {
         let uninstalled = uninstall_model_impl(&state, "realesrgan-x4plus".into()).unwrap();
         assert!(uninstalled);
     }
+}
+
+#[test]
+fn test_read_image_data_security_scoping() {
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::open(temp.path().join("test.db")).unwrap();
+    let engine = Arc::new(OrtEngine::new());
+    let preview_dir = temp.path().join("previews");
+    std::fs::create_dir_all(&preview_dir).unwrap();
+    let staging_dir = temp.path().join("staging");
+    std::fs::create_dir_all(&staging_dir).unwrap();
+    let orchestrator = JobOrchestrator::with_models_root(
+        db,
+        engine,
+        preview_dir.clone(),
+        temp.path().join("models"),
+    )
+    .with_staging_dir(&staging_dir);
+
+    let preview_scope = Arc::new(PreviewScope::new());
+    let state = AppState {
+        orchestrator,
+        models_root: Arc::new(Mutex::new(temp.path().join("models"))),
+        settings: Arc::new(Mutex::new(AppSettings::default())),
+        settings_path: temp.path().join("settings.json"),
+        staging_dir: staging_dir.clone(),
+        staging_sessions: Arc::new(Mutex::new(HashMap::new())),
+        active_installs: Arc::new(Mutex::new(HashMap::new())),
+        install_progress: Arc::new(Mutex::new(HashMap::new())),
+        preview_scope,
+    };
+
+    // 1. Rejects empty path and null bytes
+    let err = read_image_data_impl(&state, "".into()).unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+
+    let err = read_image_data_impl(&state, "foo\0bar.png".into()).unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+
+    // 2. Rejects relative paths
+    let err = read_image_data_impl(&state, "relative/path.png".into()).unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+
+    // 3. Rejects disallowed extensions (even if the file exists)
+    let secret_txt = temp.path().join("secret.txt");
+    std::fs::write(&secret_txt, b"super-secret-passwords").unwrap();
+    let err = read_image_data_impl(&state, secret_txt.to_str().unwrap().into()).unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+
+    // 4. Rejects non-existent file
+    let missing = staging_dir.join("missing.png");
+    let err = read_image_data_impl(&state, missing.to_str().unwrap().into()).unwrap_err();
+    assert_eq!(err.code, ErrorCode::FileNotFound);
+
+    // 5. Unscoped image file in arbitrary directory is rejected with PermissionDenied
+    let outside_dir = temp.path().join("user_private_docs");
+    std::fs::create_dir_all(&outside_dir).unwrap();
+    let unpicked_img = outside_dir.join("personal.png");
+    let img = image::RgbImage::new(1, 1);
+    img.save(&unpicked_img).unwrap();
+
+    let err = read_image_data_impl(&state, unpicked_img.to_str().unwrap().into()).unwrap_err();
+    assert_eq!(err.code, ErrorCode::PermissionDenied);
+
+    // 6. Staged file in staging_dir is allowed
+    let staged_img = staging_dir.join("staged.png");
+    img.save(&staged_img).unwrap();
+    let data_url = read_image_data_impl(&state, staged_img.to_str().unwrap().into()).unwrap();
+    assert!(data_url.starts_with("data:image/png;base64,"));
+
+    // 7. Preview file in preview_cache_dir is allowed
+    let preview_img = preview_dir.join("thumbnail.jpg");
+    img.save(&preview_img).unwrap();
+    let data_url = read_image_data_impl(&state, preview_img.to_str().unwrap().into()).unwrap();
+    assert!(data_url.starts_with("data:image/jpeg;base64,"));
+
+    // 8. User-picked image in arbitrary directory is allowed once allowed in preview_scope
+    let picked_img = outside_dir.join("selected_for_upscale.png");
+    img.save(&picked_img).unwrap();
+    state.preview_scope.allow_file(&picked_img);
+    let data_url = read_image_data_impl(&state, picked_img.to_str().unwrap().into()).unwrap();
+    assert!(data_url.starts_with("data:image/png;base64,"));
+
+    // 9. Sibling file in outside_dir is STILL denied (granular file-level scoping)
+    let sibling_img = outside_dir.join("not_selected.png");
+    img.save(&sibling_img).unwrap();
+    let err = read_image_data_impl(&state, sibling_img.to_str().unwrap().into()).unwrap_err();
+    assert_eq!(err.code, ErrorCode::PermissionDenied);
+
+    // 10. Output directory allowed in preview_scope allows all output images in it
+    let out_dir = temp.path().join("user_upscale_output");
+    std::fs::create_dir_all(&out_dir).unwrap();
+    state.preview_scope.allow_directory(&out_dir);
+
+    let output_img = out_dir.join("job1_result.webp");
+    img.save(&output_img).unwrap();
+    let data_url = read_image_data_impl(&state, output_img.to_str().unwrap().into()).unwrap();
+    assert!(data_url.starts_with("data:image/webp;base64,"));
 }

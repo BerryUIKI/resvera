@@ -34,6 +34,17 @@ pub struct AppState {
     pub staging_sessions: Arc<Mutex<HashMap<String, StagingUploadSession>>>,
     pub active_installs: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pub install_progress: Arc<Mutex<HashMap<String, ModelInstallProgress>>>,
+    pub preview_scope: Arc<crate::preview_scope::PreviewScope>,
+}
+
+impl AppState {
+    pub fn is_preview_path_allowed(&self, path: &Path) -> bool {
+        self.preview_scope.is_allowed(
+            path,
+            &self.staging_dir,
+            &self.orchestrator.preview_cache_dir,
+        )
+    }
 }
 
 pub fn map_orchestrator_error(err: &OrchestratorError) -> ApiError {
@@ -1401,7 +1412,7 @@ pub fn stage_input_image(
     stage_input_image_impl(&state, file_name, data)
 }
 
-pub fn pick_images_impl() -> Result<Vec<String>, ApiError> {
+pub fn pick_images_impl(state: &AppState) -> Result<Vec<String>, ApiError> {
     let files = rfd::FileDialog::new()
         .add_filter(
             "Image",
@@ -1412,13 +1423,16 @@ pub fn pick_images_impl() -> Result<Vec<String>, ApiError> {
 
     match files {
         Some(paths) => {
-            let result = paths
+            let result: Vec<String> = paths
                 .into_iter()
                 .filter_map(|p| {
                     let clean = strip_verbatim_prefix(p);
                     clean.to_str().map(|s| s.to_string())
                 })
                 .collect();
+            for path in &result {
+                state.preview_scope.allow_file(Path::new(path));
+            }
             Ok(result)
         }
         None => Ok(vec![]),
@@ -1426,8 +1440,8 @@ pub fn pick_images_impl() -> Result<Vec<String>, ApiError> {
 }
 
 #[tauri::command]
-pub fn pick_images() -> Result<Vec<String>, ApiError> {
-    pick_images_impl()
+pub fn pick_images(state: tauri::State<'_, AppState>) -> Result<Vec<String>, ApiError> {
+    pick_images_impl(&state)
 }
 
 pub fn validate_path(path_str: &str) -> Result<PathBuf, ApiError> {
@@ -1517,10 +1531,12 @@ pub fn create_upscale_job_impl(
     }
 
     let verified_input = validate_path(&req.input_path)?;
+    state.preview_scope.allow_file(&verified_input);
     req.input_path = verified_input.to_string_lossy().to_string();
 
     if !req.output_directory.trim().is_empty() {
         let verified_out = validate_output_directory(&req.output_directory)?;
+        state.preview_scope.allow_directory(&verified_out);
         req.output_directory = verified_out.to_string_lossy().to_string();
     }
 
@@ -1569,11 +1585,13 @@ pub fn create_batch_jobs_impl(
 
     for input in req.inputs.iter_mut() {
         let verified = validate_path(input)?;
+        state.preview_scope.allow_file(&verified);
         *input = verified.to_string_lossy().to_string();
     }
 
     if !req.defaults.output_directory.trim().is_empty() {
         let verified_out = validate_output_directory(&req.defaults.output_directory)?;
+        state.preview_scope.allow_directory(&verified_out);
         req.defaults.output_directory = verified_out.to_string_lossy().to_string();
     }
 
@@ -1597,6 +1615,11 @@ pub fn process_next_job_impl(state: &AppState) -> Result<Option<JobSnapshot>, Ap
         .orchestrator
         .process_next_job()
         .map_err(|e| map_orchestrator_error(&e))?;
+    if let Some(record) = &res {
+        if let Some(out_path) = &record.output_path {
+            state.preview_scope.allow_file(Path::new(out_path));
+        }
+    }
     Ok(res.map(job_record_to_snapshot))
 }
 
@@ -2242,12 +2265,100 @@ pub fn close_window(
 }
 
 #[tauri::command]
-pub fn read_image_data(path: String) -> Result<String, ApiError> {
+pub fn read_image_data(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<String, ApiError> {
+    read_image_data_impl(&state, path)
+}
+
+pub fn read_image_data_impl(state: &AppState, path: String) -> Result<String, ApiError> {
+    /// Maximum file size we will read and base64-encode for preview (50 MiB).
+    const MAX_PREVIEW_BYTES: u64 = 50 * 1024 * 1024;
+
+    /// Allowed image extensions for preview. Anything outside this list is rejected
+    /// regardless of path, so callers cannot use this endpoint to exfiltrate arbitrary files.
+    const ALLOWED_EXTENSIONS: &[&str] = &[
+        "png", "jpg", "jpeg", "webp", "bmp", "gif", "tiff", "tif", "avif",
+    ];
+
+    // Reject null bytes and empty paths immediately.
+    if path.is_empty() || path.contains('\0') {
+        return Err(ApiError {
+            code: ErrorCode::InvalidArgument,
+            message: "path must be a non-empty string without null bytes".into(),
+            details: None,
+            retryable: false,
+        });
+    }
+
     let clean_path = strip_verbatim_prefix(Path::new(&path));
-    if !clean_path.exists() || !clean_path.is_file() {
+
+    // Require an absolute path. Relative paths could escape the intended scope
+    // through parent-directory components.
+    if !clean_path.is_absolute() {
+        return Err(ApiError {
+            code: ErrorCode::InvalidArgument,
+            message: "path must be absolute".into(),
+            details: None,
+            retryable: false,
+        });
+    }
+
+    // Whitelist check: only known image extensions are allowed.
+    let ext = clean_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    if !ALLOWED_EXTENSIONS.contains(&ext.as_str()) {
+        return Err(ApiError {
+            code: ErrorCode::InvalidArgument,
+            message: format!(
+                "unsupported file extension '{}'; allowed: {}",
+                ext,
+                ALLOWED_EXTENSIONS.join(", ")
+            ),
+            details: None,
+            retryable: false,
+        });
+    }
+
+    // Existence check.
+    if !clean_path.is_file() {
         return Err(ApiError {
             code: ErrorCode::FileNotFound,
-            message: format!("File not found: {}", clean_path.display()),
+            message: format!("file not found: {}", clean_path.display()),
+            details: None,
+            retryable: false,
+        });
+    }
+
+    // Scope check: reject paths outside allowed preview scope.
+    if !state.is_preview_path_allowed(&clean_path) {
+        return Err(ApiError {
+            code: ErrorCode::PermissionDenied,
+            message: format!(
+                "access denied: path is outside allowed preview scope: {}",
+                clean_path.display()
+            ),
+            details: None,
+            retryable: false,
+        });
+    }
+
+    // Size guard: read metadata before pulling the whole file into memory.
+    let file_size = std::fs::metadata(&clean_path)
+        .map(|m| m.len())
+        .unwrap_or(u64::MAX);
+    if file_size > MAX_PREVIEW_BYTES {
+        return Err(ApiError {
+            code: ErrorCode::InvalidArgument,
+            message: format!(
+                "file is too large for preview ({} bytes > {} byte limit)",
+                file_size, MAX_PREVIEW_BYTES
+            ),
             details: None,
             retryable: false,
         });
@@ -2255,20 +2366,18 @@ pub fn read_image_data(path: String) -> Result<String, ApiError> {
 
     let bytes = std::fs::read(&clean_path).map_err(|e| ApiError {
         code: ErrorCode::StorageFailure,
-        message: format!("Failed to read image file: {e}"),
+        message: format!("failed to read image file: {e}"),
         details: None,
         retryable: false,
     })?;
 
-    let ext = clean_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
-        .unwrap_or_else(|| "png".to_string());
-
     let mime = match ext.as_str() {
         "jpg" | "jpeg" => "image/jpeg",
         "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "tiff" | "tif" => "image/tiff",
+        "avif" => "image/avif",
         _ => "image/png",
     };
 

@@ -101,7 +101,7 @@ fn main() {
 
             let engine = Arc::new(OrtEngine::new());
             let orchestrator =
-                JobOrchestrator::with_models_root(db, engine, preview_dir, &models_dir)
+                JobOrchestrator::with_models_root(db, engine, &preview_dir, &models_dir)
                     .with_staging_dir(&staging_dir);
 
             if let Ok(swept) = orchestrator.sweep_abandoned_staging() {
@@ -120,6 +120,11 @@ fn main() {
             let settings = Arc::new(Mutex::new(initial_settings));
             let models_root = Arc::new(Mutex::new(models_dir));
 
+            let preview_scope = Arc::new(resvera_desktop::PreviewScope::new());
+            preview_scope.allow_directory(&preview_dir);
+            preview_scope.allow_directory(&staging_dir);
+            preview_scope.set_tauri_scope(app.asset_protocol_scope());
+
             let app_state = AppState {
                 orchestrator,
                 models_root,
@@ -129,6 +134,7 @@ fn main() {
                 staging_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
                 active_installs: Arc::new(Mutex::new(std::collections::HashMap::new())),
                 install_progress: Arc::new(Mutex::new(std::collections::HashMap::new())),
+                preview_scope,
             };
 
             // Start backend-owned queue worker and keep worker alive for app lifetime
