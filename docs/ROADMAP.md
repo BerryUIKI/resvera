@@ -33,13 +33,13 @@ The roadmap does not defer foundational boundaries:
 ### Acceptance Criteria
 
 - [x] Both MVP Real-ESRGAN models export deterministically from pinned upstream weights.
-- [x] FP32 ONNX output passes the recorded numerical and visual parity thresholds on the fixture suite.
+- [ ] FP32 ONNX output passes the recorded numerical and visual parity thresholds on the fixture suite. *(Export toolchain and parity suite tracked by [#68](https://github.com/BerryUIKI/resvera/issues/68))*
 - [x] CPU inference completes without a GPU API or network connection.
-- [x] DirectML and CoreML either pass the parity suite or are explicitly removed from the advertised MVP matrix.
+- [x] DirectML and CoreML either pass the parity suite or are explicitly removed from the advertised MVP matrix. *(Explicitly gated/fail-closed to CPU for MVP; hardware parity testing tracked by [#68](https://github.com/BerryUIKI/resvera/issues/68))*
 - [x] The model package signature, SHA-256 verification, failed-install rollback, and active-version rollback are demonstrated.
 - [x] The queue recovers correctly after termination at each persistent state transition.
 - [x] Remacri has an approved provenance record or is formally excluded from the production catalog.
-- [x] HAT and Real-CUGAN findings are recorded with concrete blockers, supported shapes, and provider results.
+- [ ] HAT and Real-CUGAN findings are recorded with concrete blockers, supported shapes, and provider results. *(Tracked by [#68](https://github.com/BerryUIKI/resvera/issues/68))*
 
 No UI implementation should make model/provider claims before this gate passes.
 
@@ -66,7 +66,7 @@ No UI implementation should make model/provider claims before this gate passes.
 - [x] A clean installation with an installed model completes inference while all network access is blocked.
 - [x] Network inspection confirms that starting and completing jobs opens no network connections.
 - [x] CPU-only inference succeeds for both MVP models.
-- [x] Every advertised accelerated provider passes the same golden-image suite.
+- [ ] Every advertised accelerated provider passes the same golden-image suite. *(GPU providers fail-closed to CPU; physical hardware testing tracked by [#68](https://github.com/BerryUIKI/resvera/issues/68))*
 - [x] Output dimensions are exact for native and post-downsampled scales.
 - [x] Tile and whole-image output remain within the package-defined parity threshold, with no visible seams in the fixture suite.
 - [x] Cancelling during preparation, inference, merge, resize, and encode leaves no partial final output.
@@ -74,7 +74,7 @@ No UI implementation should make model/provider claims before this gate passes.
 - [x] Restart converts interrupted active work to `interrupted` and preserves queued jobs and completed history.
 - [x] A batch of 100 mixed-size fixture jobs completes without unbounded memory growth.
 - [x] Existing output files are never overwritten unless overwrite was explicitly enabled.
-- [x] Arbitrary filesystem paths cannot be loaded by the WebView asset protocol.
+- [x] Arbitrary filesystem paths cannot be loaded by the WebView asset protocol. *(Enforced and verified in [#53](https://github.com/BerryUIKI/resvera/issues/53))*
 - [x] The UI becomes interactive within the benchmark budget before any model session is initialized.
 
 Performance budgets must be stored with exact hardware, operating system, driver, provider, model version, tile shape, precision, input format, and source dimensions. Informal labels such as “mid-range GPU” are not acceptance criteria.
@@ -98,16 +98,16 @@ Performance budgets must be stored with exact hardware, operating system, driver
 
 ### Acceptance Criteria
 
-- [x] A model download is installed only after catalog signature and all artifact hashes pass.
+- [x] A model download is installed only after catalog signature and all artifact hashes pass. *(Backend installation and verification engine implemented; catalog distribution tracked by [#68](https://github.com/BerryUIKI/resvera/issues/68))*
 - [x] Corruption, signature failure, cancellation, or loss of connectivity leaves the previously active package usable.
 - [x] Model version rollback works without re-downloading when the previous version is retained.
 - [x] Starting a job with a missing model produces `modelNotInstalled` and never initiates a download.
-- [x] Real-CUGAN exposes only validated scale and strength combinations from its package manifest.
+- [ ] Real-CUGAN exposes only validated scale and strength combinations from its package manifest. *(Model export and validation tracked by [#68](https://github.com/BerryUIKI/resvera/issues/68))*
 - [x] Remacri is absent when redistribution approval is not recorded.
-- [x] `preserveSafe` updates or removes orientation, dimensions, and embedded thumbnails correctly.
-- [x] GPS metadata is preserved only when both metadata preservation and GPS preservation are enabled.
+- [x] `preserveSafe` updates or removes orientation, dimensions, and embedded thumbnails correctly. *(Implemented & verified in [#52](https://github.com/BerryUIKI/resvera/issues/52))*
+- [x] GPS metadata is preserved only when both metadata preservation and GPS preservation are enabled. *(Implemented & verified in [#52](https://github.com/BerryUIKI/resvera/issues/52))*
 - [x] A 4x model with a 2x target produces exact 2x dimensions and reports the resize stage.
-- [x] An 8x cascade produces exact dimensions, remains cancellable across passes, and makes no unsupported runtime estimate claim.
+- [ ] An 8x cascade produces exact dimensions, remains cancellable across passes, and makes no unsupported runtime estimate claim. *(Core engine logic implemented; UI workflow and automated tests tracked by [#61](https://github.com/BerryUIKI/resvera/issues/61))*
 
 ## 5. Milestone 3: HAT and Runtime Maturity
 
@@ -125,10 +125,10 @@ Performance budgets must be stored with exact hardware, operating system, driver
 
 ### Acceptance Criteria
 
-- [x] HAT whole-image and tiled output pass the package parity and seam tests.
+- [ ] HAT whole-image and tiled output pass the package parity and seam tests. *(Adapter implemented in core; ONNX export and parity validation tracked by [#68](https://github.com/BerryUIKI/resvera/issues/68))*
 - [x] Unsupported providers are excluded from the package allowlist instead of silently advertised.
 - [x] Provider fallback behavior matches automatic versus explicit selection policy.
-- [x] Runtime-component update failure leaves the previous runtime usable.
+- [ ] Runtime-component update failure leaves the previous runtime usable. *(Tracked by [#58](https://github.com/BerryUIKI/resvera/issues/58))*
 - [x] No runtime component is downloaded while a job is being prepared or executed.
 - [x] All user-facing strings switch between `en-US` and `zh-CN` without restart.
 - [x] Exported diagnostics contain no pixels, thumbnails, EXIF payloads, or unapproved absolute paths.
@@ -149,13 +149,13 @@ Performance budgets must be stored with exact hardware, operating system, driver
 
 ### Acceptance Criteria
 
-- [x] Every release artifact is reproducible within the documented build environment or has a documented variance source.
-- [x] Every artifact and catalog is signed and published with checksums and an SBOM.
-- [x] Windows and macOS packages pass platform signing verification.
-- [x] Application update failure preserves a runnable previous installation.
+- [ ] Every release artifact is reproducible within the documented build environment or has a documented variance source. *(Tracked by [#59](https://github.com/BerryUIKI/resvera/issues/59))*
+- [ ] Every artifact and catalog is signed and published with checksums and an SBOM. *(Tracked by [#58](https://github.com/BerryUIKI/resvera/issues/58))*
+- [ ] Windows and macOS packages pass platform signing verification. *(Tracked by [#58](https://github.com/BerryUIKI/resvera/issues/58))*
+- [ ] Application update failure preserves a runnable previous installation. *(Tracked by [#58](https://github.com/BerryUIKI/resvera/issues/58))*
 - [x] Offline inference regression tests pass for every release target.
 - [x] The 100-job stress suite and model/provider parity suites pass before release.
-- [x] Security tests cover path traversal, malicious manifests, oversized payloads, signature failure, and asset-scope escape attempts.
+- [x] Security tests cover path traversal, malicious manifests, oversized payloads, signature failure, and asset-scope escape attempts. *(Hardened in [#53](https://github.com/BerryUIKI/resvera/issues/53))*
 
 ## 7. Future Engine Selection
 
@@ -197,3 +197,23 @@ flowchart LR
     M2 --> M3[HAT and Runtime Maturity]
     M3 --> M4[Production Release]
 ```
+
+## 10. Pre-Release Publication Checklist
+
+To prevent unsupported, premature, or inaccurate capability claims from being published in end-user documentation, release notes, or public READMEs, every production release must pass this checklist:
+
+- [ ] **Execution Provider Verification**:
+  - No hardware accelerator (DirectML, CoreML, CUDA, OpenVINO) may be advertised as supported unless physical hardware test records, golden-image parity suites, and driver versions are committed and referenced.
+  - If a provider fails or remains unverified, documentation must state that it fails closed to the universal CPU provider.
+- [ ] **Model Catalog Verification**:
+  - No model family or checkpoint may be listed as available in the desktop UI or user guide unless its ONNX package passes deterministic export, signature validation, and the fixture parity threshold.
+  - Experimental or library-only adapters (such as Real-CUGAN and Real-HAT-GAN) must be clearly segregated as *library implementations pending model package validation*.
+- [ ] **Image Pipeline & Metadata Integrity**:
+  - EXIF orientation normalization, ICC profile embedding, and GPS scrubbing must be validated by automated tests for all supported output formats (JPEG/PNG). Format-specific limitations (such as WebP pure-Rust metadata omissions) must be explicitly noted.
+- [ ] **Offline & Security Boundary**:
+  - Verify that running inference initiates zero network connections.
+  - Verify that preview loading uses the scoped asset protocol and cannot escape allowed staging, input, or output directories.
+- [ ] **Metrics and Test Counts**:
+  - All test counts in documentation (e.g. `cargo test --workspace`) must reflect the current repository test suite count, not historical or aspirational estimates.
+- [ ] **Traceability**:
+  - Every incomplete feature or milestone deliverable must have an open GitHub issue linked directly in the roadmap and component matrix.

@@ -108,6 +108,9 @@ The planned platform order is:
 
 Provider availability is probed at runtime. Resvera never silently downloads a provider while starting a job.
 
+> [!NOTE]
+> In the current production release, execution is CPU-only across all platforms. Accelerator providers (DirectML, CoreML, CUDA) fail closed to the CPU provider until device-specific parity validation reports are published ([#68](https://github.com/BerryUIKI/resvera/issues/68)).
+
 ### 3.3 Model Adapter
 
 The model adapter owns model-family semantics that do not belong in the inference engine:
