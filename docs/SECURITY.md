@@ -26,6 +26,17 @@ The verification process follows:
 3. Each individual binary artifact is validated against its recorded SHA-256 hash.
 4. If validation fails or the connection is interrupted, the installation directory is rolled back cleanly.
 
-## 4. Reporting Vulnerabilities
+## 4. Release Distribution, Provenance & Updater Trust Root
+
+Production releases and desktop updates are governed by strict cryptographic authenticity controls:
+- **Tauri Updater Root**: Signed using Minisign/Ed25519 with public key pinned in `src-tauri/tauri.conf.json`. Releases enforce monotonic semver progression to prevent downgrade attacks.
+- **Platform Code Signing**: Authenticode signing for Windows (`.msi`, `.exe`) and Developer ID signing with Apple Notary Service for macOS (`.dmg`, `.app`).
+- **Software Bill of Materials (SBOM)**: Machine-readable CycloneDX 1.5 SBOMs generated for both Rust (`cargo-cyclonedx`) and Node (`@cyclonedx/cyclonedx-npm`) dependency graphs.
+- **SLSA Build Provenance**: Cryptographically attested via GitHub Actions (`actions/attest-build-provenance@v2`).
+- **Pre-Promotion Checksum Verification**: Mandatory validation of `SHA256SUMS.txt`, updater signatures, and SBOMs prior to release publication via `tools/release/verify_release_artifacts.py`.
+
+For complete operational details on key custody, rotation schedules, revocation procedures, and emergency update killswitches, see [RELEASE_SECURITY.md](file:///f:/dev/resvera/docs/RELEASE_SECURITY.md).
+
+## 5. Reporting Vulnerabilities
 
 If you discover a potential security vulnerability in Resvera, please file a confidential security report via GitHub Security Advisories or contact the maintainers directly.

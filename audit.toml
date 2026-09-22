@@ -1,0 +1,10 @@
+[advisories]
+ignore = [
+    "RUSTSEC-2024-0429", # Unsoundness in Iterator impls for glib::VariantStrIter (transitive via rfd on Linux; VariantStrIter is unused in Resvera)
+    "RUSTSEC-2024-0370", # proc-macro-error is unmaintained (transitive build macro)
+    "RUSTSEC-2025-0081", # unic-char-property is unmaintained (transitive unicode dependency)
+    "RUSTSEC-2025-0075", # unic-char-range is unmaintained (transitive unicode dependency)
+    "RUSTSEC-2025-0080", # unic-common is unmaintained (transitive unicode dependency)
+    "RUSTSEC-2025-0100", # unic-ucd-ident is unmaintained (transitive unicode dependency)
+    "RUSTSEC-2025-0098", # unic-ucd-version is unmaintained (transitive unicode dependency)
+]
