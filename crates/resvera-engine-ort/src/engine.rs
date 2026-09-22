@@ -10,6 +10,11 @@ use std::any::Any;
 
 const CPU_PROVIDER: &str = "cpu";
 
+/// The ONNX Runtime version bundled with this build via the `ort` crate.
+/// The `ort` crate v2.0.0-rc.13 links against ONNX Runtime 1.28.x.
+/// Update this constant when upgrading the `ort` dependency in Cargo.toml.
+const ORT_RUNTIME_VERSION: &str = "1.28.0";
+
 pub struct OrtEngine {
     default_provider: String,
 }
@@ -72,6 +77,7 @@ impl InferenceEngine for OrtEngine {
     fn capabilities(&self) -> EngineCapabilities {
         EngineCapabilities {
             engine_id: self.id(),
+            engine_version: ORT_RUNTIME_VERSION.to_string(),
             supported_providers: vec![CPU_PROVIDER.to_string()],
             supports_fp16: false,
             supports_dynamic_shapes: true,
@@ -80,14 +86,23 @@ impl InferenceEngine for OrtEngine {
 
     fn probe(&self) -> Result<EngineHealth, EngineError> {
         let provider = self.resolve_provider(None)?;
-        let _ = ort::init().with_name("resvera").commit();
+
+        // Attempt to configure ORT (idempotent if already initialised).
+        // `commit()` returns false when the global environment was already
+        // set up by a previous operation — that is NOT a failure.
+        // We use `Session::builder()` as the real health gate: if ORT shared
+        // libraries are missing or the ABI is broken this will return an error.
+        let healthy = Session::builder().is_ok();
+        let diagnostic = if healthy {
+            "ONNX Runtime initialised successfully; session health is validated at model load time"
+                .to_string()
+        } else {
+            "ONNX Runtime session builder failed; inference will not be available".to_string()
+        };
         Ok(EngineHealth {
-            healthy: true,
+            healthy,
             active_provider: provider.to_string(),
-            diagnostic_message: Some(
-                "ONNX Runtime initialized; model execution is validated when a session is loaded"
-                    .to_string(),
-            ),
+            diagnostic_message: Some(diagnostic),
         })
     }
 

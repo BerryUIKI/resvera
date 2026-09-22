@@ -217,41 +217,99 @@ pub fn get_runtime_status_impl(state: &AppState) -> Result<RuntimeStatus, ApiErr
         retryable: false,
     })?;
 
+    // Build one ProviderInfo per provider reported by the engine.
+    // A provider is considered *available* only if the engine probe succeeded AND
+    // the provider is in the supported list (all providers in supported_providers
+    // are installed by definition — they were compiled into this binary).
     let providers = caps
         .supported_providers
         .iter()
-        .map(|p| ProviderInfo {
-            id: p.clone(),
-            display_name: match p.as_str() {
-                "cpu" => "CPU (Universal Fallback)".to_string(),
-                "directml" => "DirectML (DirectX 12 GPU)".to_string(),
-                "coreml" => "CoreML (Apple Neural Engine)".to_string(),
-                "cuda" => "CUDA (NVIDIA GPU)".to_string(),
-                "openvino" => "OpenVINO (Intel Accelerator)".to_string(),
-                _ => p.to_string(),
-            },
-            version: Some("1.29.0".to_string()),
-            installed: true,
-            available: true,
-            device_name: None,
-            dedicated_memory_bytes: None,
-            diagnostic: None,
+        .map(|p| {
+            let is_active = p.eq_ignore_ascii_case(&health.active_provider);
+            ProviderInfo {
+                id: p.clone(),
+                display_name: match p.as_str() {
+                    "cpu" => "CPU (Universal Fallback)".to_string(),
+                    "directml" => "DirectML (DirectX 12 GPU)".to_string(),
+                    "coreml" => "CoreML (Apple Neural Engine)".to_string(),
+                    "cuda" => "CUDA (NVIDIA GPU)".to_string(),
+                    "openvino" => "OpenVINO (Intel Accelerator)".to_string(),
+                    _ => p.to_string(),
+                },
+                // Providers in supported_providers are compiled in, so installed=true;
+                // available means the engine initialised successfully with this provider.
+                version: None,
+                installed: true,
+                available: health.healthy && (is_active || caps.supported_providers.len() == 1),
+                device_name: None,
+                dedicated_memory_bytes: None,
+                diagnostic: if is_active {
+                    health.diagnostic_message.clone()
+                } else {
+                    None
+                },
+            }
         })
+        .collect::<Vec<_>>();
+
+    // offline_ready = engine is healthy AND at least one catalog model has a
+    // verified artifact file (pointer + ONNX file) on disk.
+    let models_root = state.models_root.lock().unwrap().clone();
+    let offline_ready = health.healthy && has_any_verified_model(&models_root);
+
+    // Preferred provider order: active provider first, then the rest in declaration order.
+    let mut automatic_provider_order: Vec<String> = caps
+        .supported_providers
+        .iter()
+        .filter(|p| p.eq_ignore_ascii_case(&health.active_provider))
+        .cloned()
         .collect();
+    automatic_provider_order.extend(
+        caps.supported_providers
+            .iter()
+            .filter(|&p| !p.eq_ignore_ascii_case(&health.active_provider))
+            .cloned(),
+    );
 
     Ok(RuntimeStatus {
         engine: EngineInfo {
             id: caps.engine_id.0,
             display_name: "ONNX Runtime".to_string(),
-            version: "1.29.0".to_string(),
+            version: caps.engine_version,
             healthy: health.healthy,
             supports_fp16: caps.supports_fp16,
             diagnostic: health.diagnostic_message,
         },
         providers,
-        automatic_provider_order: vec!["directml".into(), "coreml".into(), "cpu".into()],
-        offline_ready: true,
+        automatic_provider_order,
+        offline_ready,
     })
+}
+
+/// Returns true if at least one model in the catalog has a `current.json` pointer
+/// **and** its primary ONNX artifact exists on disk.
+/// This is a lightweight existence check — full hash verification happens at job time.
+fn has_any_verified_model(models_root: &std::path::Path) -> bool {
+    let installer = resvera_models::ModelInstaller::new(models_root);
+    let catalog = match resvera_models::load_production_catalog() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    for entry in &catalog.models {
+        if let Ok(Some(version)) = installer.get_active_version(&entry.id) {
+            // Model artifacts are stored at the conventional path:
+            // {models_root}/{model_id}/{version}/artifacts/model.onnx
+            let artifact = models_root
+                .join(&entry.id)
+                .join(&version)
+                .join("artifacts")
+                .join("model.onnx");
+            if artifact.is_file() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[tauri::command]
@@ -273,11 +331,25 @@ pub fn list_models_impl(models_root: &Path) -> Vec<ModelSummary> {
         .models
         .into_iter()
         .map(|entry| {
+            // A model is considered installed only if:
+            // 1. A valid `current.json` pointer exists (active version is set), AND
+            // 2. At least one variant's ONNX artifact file actually exists on disk.
+            // Full hash verification happens lazily at job execution time.
             let installed = installer
                 .get_active_version(&entry.id)
                 .ok()
                 .flatten()
-                .is_some();
+                .map(|version| {
+                    // Model artifacts are stored at the conventional path:
+                    // {models_root}/{model_id}/{version}/artifacts/model.onnx
+                    models_root
+                        .join(&entry.id)
+                        .join(&version)
+                        .join("artifacts")
+                        .join("model.onnx")
+                        .is_file()
+                })
+                .unwrap_or(false);
             ModelSummary {
                 id: entry.id,
                 package_version: entry.version,

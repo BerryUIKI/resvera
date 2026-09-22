@@ -150,6 +150,7 @@ impl InferenceEngine for InferenceHookEngine {
     fn capabilities(&self) -> EngineCapabilities {
         EngineCapabilities {
             engine_id: self.id(),
+            engine_version: "test".to_string(),
             supported_providers: vec!["cpu".into()],
             supports_fp16: false,
             supports_dynamic_shapes: true,
@@ -340,6 +341,7 @@ impl InferenceEngine for UninterruptibleMockEngine {
     fn capabilities(&self) -> EngineCapabilities {
         EngineCapabilities {
             engine_id: self.id(),
+            engine_version: "test".to_string(),
             supported_providers: vec!["cpu".into()],
             supports_fp16: false,
             supports_dynamic_shapes: true,
