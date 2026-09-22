@@ -14,22 +14,48 @@ Resvera is an open-source desktop image upscaler and restoration application bui
 ## ✨ Key Features / 功能亮点
 
 - ⚡ **Pure Offline AI Super-Resolution**: 100% local image upscaling with zero network dependencies during processing.
-- 🎯 **Advanced Model Adapters**:
-  - **Real-ESRGAN x4plus** (RRDB, Photography)
-  - **Real-ESRGAN x4plus Anime** (RRDB-6B, Anime / Illustrations)
-  - **Real-CUGAN 2x / 4x** (CUGAN with Reflection Padding & Denoise levels)
-  - **Real-HAT-GAN 4x** (Transformer Self-Attention with 16px Window Alignment)
+- 🎯 **Supported Models**:
+  - **Real-ESRGAN x4plus** (RRDB, Photography) — *Available & Validated*
+  - **Real-ESRGAN x4plus Anime** (RRDB-6B, Anime / Illustrations) — *Available & Validated*
+  - **Real-CUGAN 2x / 4x** & **Real-HAT-GAN 4x** — *Core adapters implemented in library; model packages pending export validation ([#68](https://github.com/BerryUIKI/resvera/issues/68))*
 - 🚀 **Hardware Acceleration & Execution Providers**:
-  - **CPU (SIMD)**: 100% verified, cross-platform default baseline across all supported platforms.
-  - Hardware accelerators (**DirectML**, **CoreML**, **CUDA**, **OpenVINO**) are integrated architecturally, but fail-closed and reported as unverified/unavailable pending maintainer hardware test records.
-- 🛡️ **Cryptographic Model Center**: Staged downloads with Ed25519 signatures and per-chunk SHA-256 integrity verification (production catalogs require pinned public keys).
+  - **CPU (SIMD)**: 100% verified cross-platform baseline across Windows, macOS, and Linux.
+  - **DirectML / CoreML / CUDA / OpenVINO**: Architecturally integrated, but fail-closed and disabled in production pending physical hardware test evidence ([#68](https://github.com/BerryUIKI/resvera/issues/68)).
 - 🎛️ **Precision Image Pipeline**:
   - Rust-native cosine tile feathering & seamless overlap blending
-  - Arbitrary custom scale downsampling (Lanczos3) and 8x multi-pass cascade upscale
-  - Safe EXIF metadata preservation (automatic GPS & thumbnail stripping)
-  - Collision-safe atomic disk writing
-- 🔍 **Interactive Comparison Viewer**: Realtime before/after split slider with smooth zoom and pan controls.
+  - Arbitrary custom scale downsampling (Lanczos3)
+  - Safe EXIF metadata preservation (`preserveSafe`, `preserveAll`, `stripAll`) with orientation normalization, ICC retention, and GPS scrubbing ([#52](https://github.com/BerryUIKI/resvera/issues/52))
+  - Collision-safe atomic disk writing with crash-consistent SQLite queue
+- 🔍 **Interactive Comparison Viewer**: Realtime before/after split slider with zoom and pan controls.
+- 🔒 **Secure Local Previews**: Scoped asset protocol with dynamic path whitelisting and hardened IPC fallback ([#53](https://github.com/BerryUIKI/resvera/issues/53)).
 - 🌐 **Full Internationalization (i18n)**: Instant reactive switching between English (`en-US`) and Simplified Chinese (`zh-CN`).
+
+---
+
+## 📊 Execution Provider Compatibility Matrix
+
+| Provider | Operating System | Status | Notes |
+|---|---|---|---|
+| **CPU (SIMD)** | Windows / macOS / Linux | ✅ **Production Supported** | Default universal fallback; verified offline across all platforms |
+| **DirectML** | Windows 10/11 | ⏳ *In Verification* ([#68](https://github.com/BerryUIKI/resvera/issues/68)) | Fail-closed to CPU until hardware parity reports are published |
+| **CoreML** | macOS (Apple Silicon / Intel) | ⏳ *In Verification* ([#68](https://github.com/BerryUIKI/resvera/issues/68)) | Fail-closed to CPU until hardware parity reports are published |
+| **CUDA** | Linux x64 | ⏳ *In Verification* ([#68](https://github.com/BerryUIKI/resvera/issues/68)) | Fail-closed to CPU until hardware parity reports are published |
+| **OpenVINO** | Linux / Windows | ⏳ *Future Roadmap* | Candidate runtime component |
+
+---
+
+## 📦 Component Implementation vs. Product Status
+
+| Feature / Component | Core Library | Desktop App | Status / Tracking |
+|---|---|---|---|
+| **Offline Inference Pipeline** | ✅ Implemented | ✅ Shipped | Production ready |
+| **RRDB (Real-ESRGAN) Adapter** | ✅ Implemented | ✅ Shipped | Validated with CPU inference |
+| **CUGAN / HAT Adapters** | ✅ Implemented | ⏳ Pending Models | Tracked by [#68](https://github.com/BerryUIKI/resvera/issues/68) |
+| **Metadata / ICC Preservation** | ✅ Implemented | ✅ Shipped | Fully verified (JPEG/PNG) ([#52](https://github.com/BerryUIKI/resvera/issues/52)) |
+| **Persistent Queue & Recovery** | ✅ Implemented | ✅ Shipped | SQLite crash-consistent queue |
+| **Model Center Crypto & Staging** | ✅ Implemented | ⏳ Pending Catalog | Engine verified; catalog hosting tracked by [#68](https://github.com/BerryUIKI/resvera/issues/68) |
+| **8x Multi-pass Cascading** | ✅ Implemented | ⏳ In Testing | Tracked by [#61](https://github.com/BerryUIKI/resvera/issues/61) |
+| **Release Signing & Auto-Updater** | ⏳ In Progress | ⏳ In Progress | Tracked by [#58](https://github.com/BerryUIKI/resvera/issues/58) |
 
 ---
 
@@ -43,7 +69,7 @@ flowchart TD
     Pipeline[Tiling Blender + Cascade Pipeline]
     Adapter[RRDB / CUGAN / HAT Model Adapters]
     Engine[ONNX Runtime Engine]
-    Provider[DirectML / CoreML / CUDA / CPU]
+    Provider[CPU / DirectML / CoreML / CUDA]
 
     UI <-->|Typed Tauri v2 IPC| Core
     Core --> Queue
@@ -70,7 +96,7 @@ pnpm install
 # 2. Run frontend typecheck & build
 pnpm run check && pnpm run build
 
-# 3. Run full Rust workspace test suite (25 tests)
+# 3. Run full Rust workspace test suite (60+ tests)
 cargo test --workspace
 
 # 4. Launch Tauri v2 desktop development application
@@ -86,7 +112,7 @@ pnpm tauri dev
 - [System Architecture](docs/ARCHITECTURE.md)
 - [API and IPC Specification](docs/API_AND_IPC_SPEC.md)
 - [Model Package Specification](docs/MODELS_SPEC.md)
-- [Milestone Roadmap (100% Completed)](docs/ROADMAP.md)
+- [Milestone Roadmap & Delivery Progress](docs/ROADMAP.md)
 
 ---
 

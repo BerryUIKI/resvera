@@ -30,13 +30,13 @@ ONNX Runtime, the `ort` binding, and every provider binary are pinned to an exac
 
 ### 3.2 Execution Providers
 
-Provider support is packaged per platform rather than in one universal runtime bundle.
+Resvera uses a capability-based, fail-closed execution provider architecture. In the current production release, **CPU (SIMD)** is the sole active execution provider across all platforms. GPU accelerators (DirectML, CoreML, CUDA) are architecturally integrated but remain disabled/fail-closed to CPU until physical hardware validation reports are published.
 
-| Platform | Required providers | Optional providers |
+| Platform | Current Active Provider | In-Verification Accelerators ([#68](https://github.com/BerryUIKI/resvera/issues/68)) |
 |---|---|---|
-| Windows | CPU, DirectML compatibility path | Windows ML-discovered providers |
-| macOS ARM64/x64 | CPU, CoreML | None initially |
-| Linux x64 | CPU | CUDA and OpenVINO distributions |
+| Windows 10/11 | CPU | DirectML compatibility path |
+| macOS ARM64/x64 | CPU | CoreML (Neural Engine / GPU) |
+| Linux x64 | CPU | CUDA (Tensor Core) |
 
 Linux AMD GPU acceleration is not promised in the initial non-Vulkan architecture. Those systems remain supported through the CPU provider.
 
