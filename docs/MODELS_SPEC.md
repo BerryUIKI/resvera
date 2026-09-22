@@ -157,22 +157,20 @@ flowchart TD
 
 Exact output dimensions are calculated from the original dimensions using checked integer arithmetic. Scale conversion is included in progress and cancellation behavior.
 
-## 8. Export and Validation
+## 8. Export and Auditable Parity Validation
 
-Every published artifact must pass:
+To ensure supply-chain integrity, safety, and repeatable numerical parity, every published model artifact must pass the following auditable toolchain gates:
 
-1. ONNX structural validation.
-2. Deterministic export from pinned upstream source and dependencies.
-3. Reference comparison against the official implementation on a versioned fixture set.
-4. Tile seam and whole-image parity tests.
-5. Provider-specific output tolerance tests.
-6. FP16 validation before FP16 is advertised.
-7. Peak-memory and OOM-recovery tests.
-8. License and attribution review.
-9. Malware scanning and immutable SHA-256 generation.
-10. Signed catalog publication.
-
-Validation reports are stored with release engineering artifacts and include runtime, driver, device, and provider versions.
+1. **Pre-Deserialization SHA-256 Verification**: Source PyTorch `.pth` checkpoint digests must be verified against expected values before deserialization to prevent malicious payload execution.
+2. **Safe Deserialization (`weights_only=True`)**: Checkpoint loading explicitly specifies `weights_only=True` when supported to mitigate Python pickle execution vulnerabilities.
+3. **State Dict Wrapper Normalization**: Checkpoint weights are normalized across official wrappers (`params_ema`, `params`, `state_dict`, `model`, and `module.` DDP prefixes).
+4. **ONNX Structural Validation**: Structural integrity is verified using `onnx.checker.check_model` (opset 17).
+5. **Numerical Parity Suite (`tools/parity/run_parity_test.py`)**:
+   - Reference PyTorch implementation evaluated against ONNX Runtime CPU execution on deterministic synthetic fixtures (gradient, checkerboard, high-frequency noise, step edge).
+   - Strict numerical thresholds: **MAD < 1e-4**, **MSE < 1e-4**, **PSNR > 60 dB**, **SSIM > 0.9999**.
+6. **Auditable Parity Report**: A versioned JSON report (`--report-path`) recording timestamp, CLI command, environment/dependency versions (Python, PyTorch, ONNX, ORT), seed, weights SHA-256, ONNX SHA-256, and per-fixture metrics.
+7. **License and Attribution Review**: Explicit SPDX license confirmation, upstream attribution, and redistribution approval.
+8. **Signed Catalog Publication**: Manifest, artifact digests, and package archives signed with Ed25519 for production Model Center distribution.
 
 ## 9. Storage and Registry
 

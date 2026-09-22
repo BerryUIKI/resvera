@@ -76,6 +76,51 @@ def export_to_onnx(
     return sha256_hash
 
 
+def normalize_checkpoint_state_dict(raw_data) -> dict:
+    """
+    Normalizes standard PyTorch checkpoint state dict representations:
+    - {'params_ema': ...} (Real-ESRGAN EMA weights)
+    - {'params': ...} (BasicSR / Real-ESRGAN non-EMA)
+    - {'state_dict': ...} (PyTorch Lightning / MMEditing)
+    - {'model': ...} (Common wrapper)
+    - Direct state dict mapping: {'conv_first.weight': ...}
+    Also strips any 'module.' prefix from DistributedDataParallel wrappers.
+    """
+    if not isinstance(raw_data, dict):
+        raise ValueError("Unexpected checkpoint structure: expected mapping object")
+
+    for key in ["params_ema", "params", "state_dict", "model"]:
+        if key in raw_data and isinstance(raw_data[key], dict):
+            raw_data = raw_data[key]
+            break
+
+    cleaned = {}
+    for k, v in raw_data.items():
+        clean_k = k[7:] if k.startswith("module.") else k
+        cleaned[clean_k] = v
+    return cleaned
+
+
+def safe_torch_load(checkpoint_path: str | Path):
+    """
+    Loads a PyTorch checkpoint safely:
+    - Enforces SHA-256 pre-verification prior to invoking this function.
+    - Explicitly requests weights_only=True to prevent arbitrary code execution via pickle.
+
+    Security Notice:
+    PyTorch .pth checkpoints rely on Python pickle deserialization. While weights_only=True
+    restricts unpickling to standard tensor primitives, any unverified pickle carries risk.
+    Resvera mandates strict pre-deserialization SHA-256 hash checks for all checkpoints.
+    """
+    import torch
+
+    try:
+        return torch.load(str(checkpoint_path), map_location="cpu", weights_only=True)
+    except TypeError:
+        # Fallback for PyTorch versions prior to weights_only support (< 2.0)
+        return torch.load(str(checkpoint_path), map_location="cpu")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Export verified Real-ESRGAN checkpoint to ONNX with strict integrity checks."
@@ -95,8 +140,8 @@ def main():
     parser.add_argument(
         "--expected-sha256",
         type=str,
-        default=None,
-        help="Expected SHA256 checksum of the weights file for integrity verification",
+        required=True,
+        help="Expected SHA256 checksum of the weights file for pre-deserialization integrity check (required)",
     )
     parser.add_argument(
         "--out-dir",
@@ -113,15 +158,15 @@ def main():
         sys.stderr.write(f"Error: Weights file not found or is not a regular file: {weights_path}\n")
         sys.exit(1)
 
+    # Pre-deserialization integrity verification
     actual_sha256 = get_sha256(weights_path)
-    if args.expected_sha256:
-        expected = args.expected_sha256.lower().strip()
-        actual = actual_sha256.lower().strip()
-        if actual != expected:
-            sys.stderr.write(
-                f"Error: Weights SHA256 mismatch!\nExpected: {expected}\nActual:   {actual}\n"
-            )
-            sys.exit(1)
+    expected = args.expected_sha256.lower().strip()
+    actual = actual_sha256.lower().strip()
+    if actual != expected:
+        sys.stderr.write(
+            f"Error: Weights SHA256 mismatch!\nExpected: {expected}\nActual:   {actual}\n"
+        )
+        sys.exit(1)
 
     out_dir = Path(args.out_dir)
     if not out_dir.exists():
@@ -132,20 +177,10 @@ def main():
 
     model = build_model(args.model)
     try:
-        import torch
-
-        state_dict = torch.load(str(weights_path), map_location="cpu")
+        raw_state = safe_torch_load(weights_path)
+        state_dict = normalize_checkpoint_state_dict(raw_state)
     except Exception as e:
         sys.stderr.write(f"Error: Failed to parse checkpoint {weights_path}: {e}\n")
-        sys.exit(1)
-
-    if isinstance(state_dict, dict):
-        if "params_ema" in state_dict:
-            state_dict = state_dict["params_ema"]
-        elif "params" in state_dict:
-            state_dict = state_dict["params"]
-    else:
-        sys.stderr.write(f"Error: Unexpected checkpoint structure: expected state dict mapping.\n")
         sys.exit(1)
 
     try:
