@@ -135,11 +135,17 @@ Acceptance:
   workflow.
 - Add the declared AGPL license file and reconcile README, architecture, security,
   user guide, and roadmap claims with actual evidence.
+- Add production release security, code signing (Authenticode/Developer ID), CycloneDX SBOMs,
+  build provenance (SLSA), pre-promotion checksum verification, and Tauri updater workflows
+  documented in `docs/RELEASE_SECURITY.md`.
 
 Acceptance:
 
 - `cargo fmt --check`, Clippy with warnings denied, the Rust workspace test suite,
   frontend tests/typecheck/build, and a Tauri no-bundle build all pass.
+- Dependency review, Cargo audit, and pnpm audit workflows enforce automated security screening.
+- Release artifacts are verified with SHA-256 checksums, signed updater manifests, and SBOMs
+  before release promotion.
 - No completed roadmap item lacks a linked automated test or recorded external
   verification artifact.
 

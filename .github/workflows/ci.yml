@@ -55,6 +55,9 @@ jobs:
       - name: Export & Parity Toolchain Tests
         run: python3 -m unittest discover -s tools/export
 
+      - name: Release Verification Tool Tests
+        run: python3 -m unittest discover -s tools/release
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

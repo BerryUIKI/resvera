@@ -1,0 +1,268 @@
+name: Production Release & Distribution
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag name (e.g. v0.1.0)"
+        required: true
+        default: "v0.1.0"
+      draft:
+        description: "Publish as draft release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build-release:
+    name: Build & Package (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - platform: darwin-universal
+            os: macos-latest
+            target: universal-apple-darwin
+          - platform: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+          targets: ${{ matrix.target }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+
+      - name: Install system dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Windows Signing Certificate
+        if: matrix.os == 'windows-latest' && env.WINDOWS_CERTIFICATE_BASE64 != ''
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $certBytes = [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64)
+          $certPath = Join-Path $env:TEMP "resvera-authenticode.pfx"
+          [System.IO.File]::WriteAllBytes($certPath, $certBytes)
+          Write-Output "TAURI_BUNDLE_WINDOWS_CERTIFICATE=$certPath" >> $env:GITHUB_ENV
+          Write-Output "TAURI_BUNDLE_WINDOWS_CERTIFICATE_PASSWORD=$env:WINDOWS_CERTIFICATE_PASSWORD" >> $env:GITHUB_ENV
+
+      - name: Setup macOS Signing & Notarization
+        if: matrix.os == 'macos-latest' && env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
+          security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          echo "$APPLE_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$APPLE_KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+      - name: Build Tauri Desktop Application & Bundles
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm exec tauri build
+
+      - name: Collect Platform Artifacts (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-artifacts
+          Copy-Item -Path "src-tauri/target/release/bundle/nsis/*.exe" -Destination "dist-artifacts/" -ErrorAction SilentlyContinue
+          Copy-Item -Path "src-tauri/target/release/bundle/msi/*.msi" -Destination "dist-artifacts/" -ErrorAction SilentlyContinue
+          Copy-Item -Path "src-tauri/target/release/bundle/nsis/*.zip" -Destination "dist-artifacts/" -ErrorAction SilentlyContinue
+          Copy-Item -Path "src-tauri/target/release/bundle/nsis/*.sig" -Destination "dist-artifacts/" -ErrorAction SilentlyContinue
+
+      - name: Collect Platform Artifacts (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          mkdir -p dist-artifacts
+          cp -f src-tauri/target/release/bundle/dmg/*.dmg dist-artifacts/ || true
+          cp -f src-tauri/target/release/bundle/macos/*.tar.gz dist-artifacts/ || true
+          cp -f src-tauri/target/release/bundle/macos/*.sig dist-artifacts/ || true
+
+      - name: Collect Platform Artifacts (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          mkdir -p dist-artifacts
+          cp -f src-tauri/target/release/bundle/appimage/*.AppImage dist-artifacts/ || true
+          cp -f src-tauri/target/release/bundle/appimage/*.tar.gz dist-artifacts/ || true
+          cp -f src-tauri/target/release/bundle/appimage/*.sig dist-artifacts/ || true
+          cp -f src-tauri/target/release/bundle/deb/*.deb dist-artifacts/ || true
+
+      - name: Upload Platform Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.platform }}
+          path: dist-artifacts/*
+
+  generate-sbom:
+    name: Generate CycloneDX SBOMs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+
+      - name: Generate Rust CycloneDX SBOM
+        run: |
+          mkdir -p sbom-artifacts
+          cargo cyclonedx --all --output-format json
+          find . -name "*.cdx.json" -exec cp {} sbom-artifacts/ \;
+          cp sbom-artifacts/resvera-desktop.cdx.json sbom-artifacts/sbom-rust.cdx.json || true
+
+      - name: Generate Node CycloneDX SBOM
+        run: |
+          pnpm dlx @cyclonedx/cyclonedx-npm --output-file sbom-artifacts/sbom-node.cdx.json
+
+      - name: Upload SBOM Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-sbom
+          path: sbom-artifacts/*
+
+  assemble-and-release:
+    name: Verify, Attest & Publish Release
+    needs: [build-release, generate-sbom]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Download all built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded-artifacts
+
+      - name: Consolidate Release Assets
+        run: |
+          mkdir -p dist
+          find downloaded-artifacts -type f -exec cp {} dist/ \;
+          ls -la dist/
+
+      - name: Generate SHA256 Checksums
+        run: |
+          python3 tools/release/verify_release_artifacts.py --dist-dir dist --generate-checksums
+
+      - name: Assemble Tauri latest.json Updater Manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 -c "
+          import json, os, glob, datetime
+          from pathlib import Path
+
+          tag = os.environ.get('RELEASE_TAG', 'v0.1.0')
+          version = tag.lstrip('v')
+          manifest = {
+              'version': version,
+              'notes': f'Resvera release {tag}',
+              'pub_date': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              'platforms': {}
+          }
+
+          # Map updater packages
+          dist = Path('dist')
+          for sig_file in dist.glob('*.sig'):
+              pkg_name = sig_file.stem
+              pkg_path = dist / pkg_name
+              if not pkg_path.exists():
+                  continue
+              sig_content = sig_file.read_text().strip()
+              url = f'https://github.com/BerryUIKI/resvera/releases/download/{tag}/{pkg_name}'
+
+              if 'x64' in pkg_name or 'nsis' in pkg_name:
+                  manifest['platforms']['windows-x86_64'] = {'signature': sig_content, 'url': url}
+              elif 'darwin' in pkg_name or 'aarch64' in pkg_name:
+                  manifest['platforms']['darwin-aarch64'] = {'signature': sig_content, 'url': url}
+              elif 'AppImage' in pkg_name or 'amd64' in pkg_name:
+                  manifest['platforms']['linux-x86_64'] = {'signature': sig_content, 'url': url}
+
+          with open('dist/latest.json', 'w') as f:
+              json.dump(manifest, f, indent=2)
+          "
+          cat dist/latest.json
+
+      - name: Pre-Promotion Release Verification Gate
+        run: |
+          python3 tools/release/verify_release_artifacts.py \
+            --dist-dir dist \
+            --expected-version "${{ github.ref_name }}" \
+            --require-sbom \
+            --require-updater
+
+      - name: Attest Build Provenance (SLSA)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: dist/*
+          draft: ${{ github.event.inputs.draft || false }}
+          generate_release_notes: true
