@@ -552,12 +552,7 @@ impl JobOrchestrator {
 
         let result = self.execute_job(&next_job, &cancel_token);
 
-        {
-            *self.active_job_id.lock().unwrap() = None;
-            self.active_cancel_tokens.lock().unwrap().remove(&job_id);
-        }
-
-        match result {
+        let final_record = match result {
             Ok(completed) => {
                 self.cleanup_staged_input_if_unreferenced(&next_job.input_path);
                 Ok(Some(completed))
@@ -576,7 +571,14 @@ impl JobOrchestrator {
                 self.cleanup_staged_input_if_unreferenced(&next_job.input_path);
                 Ok(self.db.get_job(&job_id)?)
             }
+        };
+
+        {
+            *self.active_job_id.lock().unwrap() = None;
+            self.active_cancel_tokens.lock().unwrap().remove(&job_id);
         }
+
+        final_record
     }
 
     fn execute_job(
