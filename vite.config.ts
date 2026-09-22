@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 
@@ -10,5 +11,15 @@ export default defineConfig({
   },
   build: {
     target: "esnext",
+  },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test/setup.ts"],
+    server: {
+      deps: {
+        inline: [/solid-js/],
+      },
+    },
   },
 });

@@ -13,6 +13,8 @@
     "build": "vite build",
     "check": "tsc --noEmit",
     "check:hygiene": "cargo fmt --all -- --check && git diff --check",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -24,11 +26,14 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.2.0",
+    "@testing-library/jest-dom": "^7.0.1",
     "autoprefixer": "^10.4.20",
+    "jsdom": "^30.1.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.16",
     "typescript": "^5.6.3",
     "vite": "^6.0.3",
-    "vite-plugin-solid": "^2.11.0"
+    "vite-plugin-solid": "^2.11.0",
+    "vitest": "^5.0.1"
   }
 }
