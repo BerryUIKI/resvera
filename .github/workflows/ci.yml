@@ -91,8 +91,8 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Frontend Typecheck & Build
-        run: pnpm run check && pnpm run build
+      - name: Frontend Typecheck, Tests & Build
+        run: pnpm run check && pnpm run test && pnpm run build
 
       - name: Run Rust Workspace Tests
         run: cargo test --workspace --verbose
