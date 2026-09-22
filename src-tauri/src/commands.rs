@@ -2186,6 +2186,15 @@ pub fn save_settings_impl(
 
     atomic_write_settings(&state.settings_path, &new_settings)?;
 
+    let policy = match new_settings.metadata_policy.as_str() {
+        "stripAll" | "strip" => resvera_core::MetadataPolicy::Strip,
+        "preserveAll" => resvera_core::MetadataPolicy::PreserveAll,
+        _ => resvera_core::MetadataPolicy::PreserveSafe {
+            preserve_gps: false,
+        },
+    };
+    state.orchestrator.set_metadata_policy(policy);
+
     let mut s = state.settings.lock().unwrap();
     *s = new_settings.clone();
     Ok(new_settings)

@@ -100,9 +100,15 @@ fn main() {
             })?;
 
             let engine = Arc::new(OrtEngine::new());
+            let metadata_policy = match initial_settings.metadata_policy.as_str() {
+                "stripAll" | "strip" => resvera_core::MetadataPolicy::Strip,
+                "preserveAll" => resvera_core::MetadataPolicy::PreserveAll,
+                _ => resvera_core::MetadataPolicy::PreserveSafe { preserve_gps: false },
+            };
             let orchestrator =
                 JobOrchestrator::with_models_root(db, engine, &preview_dir, &models_dir)
-                    .with_staging_dir(&staging_dir);
+                    .with_staging_dir(&staging_dir)
+                    .with_metadata_policy(metadata_policy);
 
             if let Ok(swept) = orchestrator.sweep_abandoned_staging() {
                 if swept > 0 {

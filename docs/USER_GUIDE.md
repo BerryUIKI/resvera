@@ -51,6 +51,11 @@ Resvera 是一款支持全平台、纯离线运行的高性能 AI 图像超分�
 
 ## 🛡️ Privacy & Metadata Policy / 隐私与元数据策略
 
-- **Preserve Safe (推荐)**: Preserves camera metadata and ICC color profiles while automatically stripping GPS coordinates and embedded thumbnails.
-- **Strip All Metadata**: Removes 100% of EXIF, XMP, and GPS tags for maximum privacy.
-- **Preserve GPS**: Optional toggle to keep geotags if explicitly needed.
+- **Preserve Safe (`preserveSafe`, 默认推荐)**: Preserves camera/lens EXIF metadata and ICC color profiles while automatically stripping GPS coordinates and embedded thumbnails.
+- **Strip All Metadata (`stripAll`)**: Removes 100% of EXIF, XMP, ICC, and GPS tags for maximum privacy and minimal file size.
+- **Preserve All (`preserveAll`)**: Preserves camera metadata, ICC color profiles, and GPS geotags.
+
+### Format-Specific Metadata Support / 格式元数据支持限制
+
+- **JPEG & PNG**: Full support for ICC color-profile preservation and sanitized EXIF metadata embedding. EXIF orientation (tag `0x0112`) is applied directly to pixel buffers during decoding and normalized to `1` (Normal) in output headers to avoid double-rotation in downstream viewers.
+- **WebP**: Due to limitations in the pure-Rust WebP encoder (`image::codecs::webp`), metadata (EXIF/ICC) embedding is not currently supported for WebP outputs. If metadata or color-profile preservation is required, select JPEG or PNG as the output format.
