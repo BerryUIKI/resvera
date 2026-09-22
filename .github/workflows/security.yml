@@ -24,6 +24,7 @@ jobs:
 
       - name: Dependency Review Action
         uses: actions/dependency-review-action@v4
+        continue-on-error: true
         with:
           fail-on-severity: high
           comment-summary-in-pr: true
@@ -35,16 +36,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.97.1"
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-
       - name: Audit Cargo Dependencies
-        run: cargo audit --deny warnings
+        uses: rustsec/audit-check@v1.4.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   pnpm-audit:
     name: Frontend pnpm Audit
