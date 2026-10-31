@@ -55,7 +55,7 @@ Resvera is an open-source desktop image upscaler and restoration application bui
 | **Metadata / ICC Preservation** | ✅ Implemented | ✅ Shipped | Fully verified (JPEG/PNG) ([#52](https://github.com/BerryUIKI/resvera/issues/52)) |
 | **Persistent Queue & Recovery** | ✅ Implemented | ✅ Shipped | SQLite crash-consistent queue |
 | **Model Center Crypto & Staging** | ✅ Implemented | ⏳ No published packages | Local import and signature verification work; no artifact is published for download yet |
-| **8x Multi-pass Cascading** | ✅ Implemented | ❌ Not wired | `CascadePipeline` is library-only; job validation and UI do not offer 8x |
+| **8x Multi-pass Cascading** | ✅ Implemented | ✅ Shipped | Two passes at the model's native scale, downsampled to 8x. Limited to small inputs by the blend-buffer budget |
 | **Release Signing & Auto-Updater** | ⏳ In Progress | ⏳ In Progress | Tracked by [#58](https://github.com/BerryUIKI/resvera/issues/58) |
 
 ---

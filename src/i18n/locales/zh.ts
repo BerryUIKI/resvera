@@ -52,6 +52,8 @@ export const zh = {
     resetDir: "恢复默认",
     model: "超分模型",
     scaleFactor: "放大倍率",
+    cascadeHint:
+      "8x 会执行两次模型推理（4x 后再 4x）再降采样，需要较小的输入图像，耗时明显高于 4x。",
     outputFormat: "输出格式",
     quality: "画质质量",
     overwriteExisting: "覆盖同名文件",

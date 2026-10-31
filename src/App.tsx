@@ -74,9 +74,14 @@ export const App: Component = () => {
   const [selectedBlendMode, setSelectedBlendMode] = createSignal("cosine");
 
   const selectedModel = () => models().find((m) => m.id === selectedModelId());
+  // Largest scale the selected model can reach. Beyond its native scale the
+  // backend runs additional passes (a 4x model reaches 8x in two passes), so the
+  // ceiling is one chain step above native rather than the native value itself.
   const maxModelScale = () => {
     const m = selectedModel();
-    return m && m.nativeScales && m.nativeScales.length > 0 ? Math.max(...m.nativeScales) : 4;
+    const native =
+      m && m.nativeScales && m.nativeScales.length > 0 ? Math.max(...m.nativeScales) : 4;
+    return native >= 4 ? 8 : native;
   };
 
   // Accordion Sections Fold State
@@ -736,8 +741,8 @@ export const App: Component = () => {
               {/* Target Scale */}
               <div class="pt-2">
                 <label class="text-[11px] font-medium text-slate-400 block mb-1.5">{t("controls.scaleFactor")}</label>
-                <div class="grid grid-cols-3 gap-1.5">
-                  {[1, 2, 4].map((s) => {
+                <div class="grid grid-cols-4 gap-1.5">
+                  {[1, 2, 4, 8].map((s) => {
                     const disabled = s > maxModelScale();
                     return (
                       <button
@@ -756,6 +761,11 @@ export const App: Component = () => {
                     );
                   })}
                 </div>
+                <Show when={targetScale() > 4}>
+                  <p class="mt-1.5 text-[10px] leading-snug text-amber-400/80">
+                    {t("controls.cascadeHint")}
+                  </p>
+                </Show>
               </div>
             </div>
 

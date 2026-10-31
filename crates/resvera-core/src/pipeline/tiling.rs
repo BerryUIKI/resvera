@@ -4,6 +4,17 @@ use serde::{Deserialize, Serialize};
 
 const MAX_BLEND_BUFFER_BYTES: usize = 512 * 1024 * 1024;
 
+/// Number of running-sum planes a [`TileBlender`] allocates per output pixel.
+const BLEND_PLANES: usize = 4;
+
+/// Largest output the blend stage can composite, in pixels.
+///
+/// Job preflight must reject anything above this: the buffer is allocated after
+/// decoding and tiling, so discovering the limit there produces an allocation
+/// error far from the setting that caused it.
+pub const MAX_BLEND_OUTPUT_PIXELS: u64 =
+    (MAX_BLEND_BUFFER_BYTES / (BLEND_PLANES * std::mem::size_of::<f32>())) as u64;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum BlendMode {

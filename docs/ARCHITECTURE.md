@@ -177,7 +177,8 @@ Progress is reported by completed tile weight, not by parsing runtime console ou
 
 - A native model scale is preferred.
 - A target below the native scale runs once at native scale and then uses Lanczos3 downsampling.
-- `CascadePipeline` can express a two-pass cascade (e.g. two 4x passes producing 16x, then Lanczos3 downsampling to 8x), but it is currently **library-only**: job validation rejects `target_scale > native_scale` and the UI offers only 1x/2x/4x. Cascade work is represented as multiple pipeline stages and is not expected to take only twice as long as a single pass.
+- A target above the native scale runs `target / native` passes and downsamples that overshoot with Lanczos3: an 8x request on a 4x model runs two 4x passes to produce 16x and then downsamples to 8x. Only integral multiples of the model's native scale are reachable.
+- The cascade is wired into the job orchestrator, but its peak working buffer is the *last pass's* output rather than the requested size, so memory — not compute — bounds it. `MAX_BLEND_OUTPUT_PIXELS` (33.5 MP under a 512 MB blend budget) is checked at submit time, which makes 8x practical only for small inputs. The UI states this rather than failing mid-job.
 
 ## 5. Job Queue and Lifecycle
 

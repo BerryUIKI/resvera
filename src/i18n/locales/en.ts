@@ -52,6 +52,8 @@ export const en = {
     resetDir: "Reset",
     model: "Model",
     scaleFactor: "Scale Factor",
+    cascadeHint:
+      "8x runs the model twice (4x then 4x) and downsamples the result. It needs a small input image and takes considerably longer than 4x.",
     outputFormat: "Output Format",
     quality: "Quality",
     overwriteExisting: "Overwrite Existing",
