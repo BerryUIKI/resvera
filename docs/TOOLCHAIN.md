@@ -9,7 +9,7 @@ This document defines the exact, reproducible toolchain versions required to bui
 | Tool / Runtime | Pinned Version | Canonical Configuration Source | CI Enforcement |
 |---|---|---|---|
 | **Rust Toolchain** | `1.97.1` | `rust-toolchain.toml` | `dtolnay/rust-toolchain` via `rust-toolchain.toml` |
-| **Node.js** | `22.13.0` | `.node-version`, `package.json#engines` | `actions/setup-node@v4` with `node-version-file: .node-version` |
+| **Node.js** | `22.15.0` | `.node-version`, `package.json#engines` | `actions/setup-node@v4` with `node-version-file: .node-version` |
 | **pnpm** | `11.18.0` | `package.json#packageManager` | `pnpm/action-setup@v4` with `version: 11.18.0` |
 | **Python** | `3.12.7` | `.python-version` | `actions/setup-python@v5` with `python-version-file: .python-version` |
 | **Model Export Toolchain** | Exact pins | `tools/export/requirements.txt`, `requirements-lock.txt` | `pip install -r tools/export/requirements.txt` |
@@ -74,7 +74,16 @@ When upgrading any toolchain component, follow these disciplined procedures:
    pnpm run check
    pnpm run build
    ```
-4. Commit updated `package.json` and `pnpm-lock.yaml`.
+4. Run the test suite **on the pinned Node version**, not on your default
+   shell's Node:
+   ```bash
+   volta run --node "$(cat .node-version)" node node_modules/vitest/vitest.mjs run
+   ```
+   CI uses exactly the pinned version, and dependencies can depend on Node
+   APIs newer than the pin. A suite that passes on a newer local Node and
+   fails in CI wastes a full CI cycle; `undici` 8.12.x calling
+   `zlib.createZstdDecompress` (Node 22.15+) was one such case.
+5. Commit updated `.node-version`, `package.json`, and `pnpm-lock.yaml`.
 
 ### 3.3 Python & Export Toolchain Upgrades
 1. Update `.python-version`:

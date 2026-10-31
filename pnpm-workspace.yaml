@@ -2,3 +2,9 @@ allowBuilds:
   esbuild: true
 overrides:
   ansi-regex: ">=5.0.1"
+  # GHSA-68fv-2mgg-jv7q: event-loop DoS via indexed source-map section offsets.
+  # Reached transitively through vite -> postcss and jsdom -> css-tree.
+  source-map-js: ">=1.2.2"
+  # GHSA-rj75-hqrm-r3gf: quadratic complexity in flat selector parsing.
+  # Reached transitively through tailwindcss -> postcss-nested.
+  postcss-selector-parser: ">=6.1.5"
