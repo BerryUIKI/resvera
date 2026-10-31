@@ -212,6 +212,7 @@ fn test_submission_rejects_incompatible_model_options() {
         provider_preference: None,
     };
 
+    // 5x is unreachable from a 4x model (the cascade yields 8x or 16x).
     let mut invalid = base.clone();
     invalid.target_scale = 5;
     assert!(orchestrator.submit_job(&invalid).is_err());
@@ -472,7 +473,7 @@ fn test_preflight_input_validation() {
                 .contains("Cannot determine image format")
     );
 
-    // 4. Target scale 8x requested on 4x model (scale truthfulness)
+    // 4. 8x on a 4x model is served by a two-pass cascade and must be accepted.
     let valid_png = temp.path().join("valid.png");
     create_test_image(&valid_png, 16, 16);
     let req_scale_8 = UpscaleJobRequest {
@@ -480,10 +481,23 @@ fn test_preflight_input_validation() {
         target_scale: 8,
         ..req_nonexistent.clone()
     };
-    let err_scale_8 = orchestrator.submit_job(&req_scale_8).unwrap_err();
-    assert!(err_scale_8
-        .to_string()
-        .contains("Target scale 8x is unsupported by variant 'default' (native 4x)"));
+    assert!(orchestrator.submit_job(&req_scale_8).is_ok());
+
+    // 5. A scale the cascade cannot reach is still rejected.
+    // Use a distinct file: re-submitting the same input is rejected separately
+    // by the duplicate-active-job guard.
+    let scale5_png = temp.path().join("valid_scale5.png");
+    create_test_image(&scale5_png, 16, 16);
+    let req_scale_5 = UpscaleJobRequest {
+        input_path: scale5_png.to_str().unwrap().to_string(),
+        target_scale: 5,
+        ..req_nonexistent.clone()
+    };
+    let err_scale_5 = orchestrator.submit_job(&req_scale_5).unwrap_err();
+    assert!(
+        err_scale_5.to_string().contains("not a multiple"),
+        "unexpected error: {err_scale_5}"
+    );
 }
 
 #[test]
@@ -641,4 +655,101 @@ fn test_advanced_processing_controls_validation() {
     invalid_blend.blend_mode = Some("unknown_blend_mode".to_string());
     let err_blend = orchestrator.submit_job(&invalid_blend).unwrap_err();
     assert!(err_blend.to_string().contains("Unsupported blend mode"));
+}
+
+#[test]
+fn test_8x_cascade_job_produces_exact_dimensions() {
+    // A 4x model asked for 8x must run two passes, overshoot to 16x, and
+    // downsample back to exactly 8x.
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(MockEngine);
+    let models_root = temp.path().join("models");
+    install_mock_model(&models_root, "realesrgan-x4plus", 4);
+    let orchestrator = JobOrchestrator::with_models_root(
+        db.clone(),
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    );
+
+    let input_path = temp.path().join("small.png");
+    // 16x16 -> 128x128 at 8x.
+    create_test_image(&input_path, 16, 16);
+
+    let req = UpscaleJobRequest {
+        input_path: input_path.to_str().unwrap().to_string(),
+        output_directory: temp.path().to_str().unwrap().to_string(),
+        model_id: "realesrgan-x4plus".to_string(),
+        model_variant_id: "default".to_string(),
+        target_scale: 8,
+        output_format: OutputFormat::Png,
+        overwrite: false,
+        tile_size: Some(32),
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
+        provider_preference: Some("cpu".to_string()),
+    };
+
+    orchestrator.submit_job(&req).unwrap();
+    let completed = orchestrator
+        .process_next_job()
+        .unwrap()
+        .expect("cascade job should complete");
+
+    assert_eq!(
+        completed.state, "succeeded",
+        "cascade job failed: {:?}",
+        completed.error_message
+    );
+
+    let output = image::open(completed.output_path.as_deref().unwrap()).unwrap();
+    assert_eq!(output.width(), 128);
+    assert_eq!(output.height(), 128);
+}
+
+#[test]
+fn test_8x_cascade_rejects_oversized_input_at_submit() {
+    // The peak working buffer for 4x + 4x is 16x, so a large input must be
+    // rejected up front instead of failing deep inside the pipeline.
+    let temp = tempdir().unwrap();
+    let db = AppDatabase::new_in_memory().unwrap();
+    let engine = Arc::new(MockEngine);
+    let models_root = temp.path().join("models");
+    install_mock_model(&models_root, "realesrgan-x4plus", 4);
+    let orchestrator = JobOrchestrator::with_models_root(
+        db.clone(),
+        engine,
+        temp.path().join("previews"),
+        &models_root,
+    );
+
+    let input_path = temp.path().join("big.png");
+    // 1000x1000 at 16x is 256 MP, far past the blend buffer ceiling.
+    create_test_image(&input_path, 1000, 1000);
+
+    let req = UpscaleJobRequest {
+        input_path: input_path.to_str().unwrap().to_string(),
+        output_directory: temp.path().to_str().unwrap().to_string(),
+        model_id: "realesrgan-x4plus".to_string(),
+        model_variant_id: "default".to_string(),
+        target_scale: 8,
+        output_format: OutputFormat::Png,
+        overwrite: false,
+        tile_size: Some(32),
+        tile_overlap: None,
+        blend_mode: None,
+        naming_template: None,
+        provider_preference: Some("cpu".to_string()),
+    };
+
+    let error = orchestrator
+        .submit_job(&req)
+        .expect_err("oversized cascade must be rejected before queueing");
+    let message = error.to_string();
+    assert!(
+        message.contains("pixel") || message.contains("limit"),
+        "error should explain the size limit, got: {message}"
+    );
 }

@@ -10,7 +10,8 @@ use crate::pipeline::metadata::MetadataPolicy;
 use crate::pipeline::naming::strip_verbatim_prefix;
 use crate::pipeline::resample::{downsample_lanczos3, resample_rgb_lanczos3};
 use crate::pipeline::tiling::{BlendMode, TileBlender, TilePlan};
-use image::RgbImage;
+use crate::pipeline::{CascadePass, CascadePipeline};
+use image::{GrayImage, RgbImage};
 use resvera_models::{InstallerError, ModelInstaller, ModelManifest, ResolvedModel};
 use resvera_persistence::{AppDatabase, DatabaseError, JobRecord};
 use serde::{Deserialize, Serialize};
@@ -326,11 +327,32 @@ impl JobOrchestrator {
                 .map_err(|e| OrchestratorError::Validation(e.to_string()))?;
         }
 
-        if target_scale == 0 || target_scale > resolved.variant.native_scale {
+        // A target above the variant's native scale is served by repeating the
+        // model in a cascade. `cascade_passes_for_scale` decides how many passes
+        // are needed and whether the chain overshoots (4x + 4x = 16x -> 8x).
+        let passes = cascade_passes_for_scale(resolved.variant.native_scale, target_scale)
+            .map_err(OrchestratorError::Validation)?;
+        if passes > MAX_CASCADE_PASSES {
             return Err(OrchestratorError::Validation(format!(
-                "Target scale {target_scale}x is unsupported by variant '{}' (native {}x)",
-                resolved.variant.id, resolved.variant.native_scale
+                "Target scale {target_scale}x needs {passes} passes at {}x, exceeding the {MAX_CASCADE_PASSES} pass limit",
+                resolved.variant.native_scale
             )));
+        }
+
+        // Below native scale a single pass plus a Lanczos3 downsample handles any
+        // integral factor. Above native scale the cascade runs `passes` passes and
+        // downsamples that overshoot, so only integral multiples of the native
+        // scale are reachable; an unrelated factor such as 5x has no meaning.
+        let native = resolved.variant.native_scale;
+        if target_scale > native {
+            let reachable = native
+                .checked_mul(passes)
+                .ok_or_else(|| OrchestratorError::Validation("Scale overflowed".into()))?;
+            if target_scale != reachable {
+                return Err(OrchestratorError::Validation(format!(
+                    "Target scale {target_scale}x is not a multiple of the {native}x model scale"
+                )));
+            }
         }
 
         let capabilities = self.engine.capabilities();
@@ -605,16 +627,38 @@ impl JobOrchestrator {
         let constraints = adapter.tile_constraints(&resolved.manifest);
         let tile_size = validated_tile_size(job.tile_size, constraints)?;
         let tile_overlap = validated_tile_overlap(job.tile_overlap, tile_size, constraints)?;
-        let plan = TilePlan::build(width, height, tile_size, tile_overlap);
-        let total_tiles = plan.tiles.len();
-        if total_tiles == 0 {
-            return Err(OrchestratorError::Validation(
-                "Input image produced an empty tile plan".into(),
-            ));
+
+        let native_scale = resolved.variant.native_scale;
+        let pass_count = cascade_passes_for_scale(native_scale, job.target_scale)
+            .map_err(OrchestratorError::Validation)?;
+
+        // Scale reachability was already validated at submit time by
+        // `resolve_request_model`; this only re-derives the pass count.
+
+        // Reject an oversized working buffer before decoding or loading a model:
+        // the peak allocation is the last pass's output, not the requested size,
+        // so a 4x + 4x cascade for 8x peaks at 16x.
+        let mut peak_w = width;
+        let mut peak_h = height;
+        for _ in 0..pass_count {
+            peak_w = peak_w
+                .checked_mul(native_scale)
+                .ok_or_else(|| OrchestratorError::Validation("Cascaded width overflowed".into()))?;
+            peak_h = peak_h.checked_mul(native_scale).ok_or_else(|| {
+                OrchestratorError::Validation("Cascaded height overflowed".into())
+            })?;
+        }
+        let peak_pixels = (peak_w as u64) * (peak_h as u64);
+        if peak_pixels > crate::pipeline::MAX_BLEND_OUTPUT_PIXELS {
+            return Err(OrchestratorError::Validation(format!(
+                "A {pass_count}-pass cascade at {native_scale}x from {width}x{height} needs a \
+                 {peak_w}x{peak_h} working buffer ({peak_pixels} pixels), exceeding the \
+                 {} pixel blending limit. Reduce the target scale or use a smaller input.",
+                crate::pipeline::MAX_BLEND_OUTPUT_PIXELS
+            )));
         }
 
         let model_bytes = std::fs::read(&resolved.artifact_path)?;
-        let mut session = self.engine.load(&model_bytes, job.provider_id.as_deref())?;
 
         if !self
             .db
@@ -622,13 +666,70 @@ impl JobOrchestrator {
         {
             return Err(OrchestratorError::Cancelled);
         }
-        let native_scale = resolved.variant.native_scale;
         let blend_mode = match job.blend_mode.as_deref() {
             Some(s) => s
                 .parse::<BlendMode>()
                 .map_err(|e| OrchestratorError::Validation(e.to_string()))?,
             None => BlendMode::Cosine,
         };
+
+        if pass_count > 1 {
+            // Multi-pass cascade: the same model is repeated, and the cascade
+            // downsamples the overshoot (4x + 4x = 16x) to the requested scale.
+            let cascade = CascadePipeline::new(Arc::clone(&self.engine));
+            let adapter_ref: &dyn ModelAdapter = adapter.as_ref();
+            let passes: Vec<CascadePass<'_>> = (0..pass_count)
+                .map(|_| CascadePass {
+                    adapter: adapter_ref,
+                    weights: &model_bytes,
+                    constraints,
+                    native_scale,
+                })
+                .collect();
+
+            let mut progress = JobProgressReporter {
+                db: &self.db,
+                job_id: &job.id,
+            };
+            let output_img = cascade.run(
+                &src_img,
+                &passes,
+                job.target_scale,
+                blend_mode,
+                cancel,
+                &mut progress,
+            )?;
+            let output_alpha =
+                resample_alpha_to_scale(&src_alpha, width, height, job.target_scale)?;
+
+            // `finish_job` commits success, which the database only accepts from
+            // the finalizing state. The single-pass path transitions inside its
+            // tile loop; the cascade has to do it explicitly.
+            cancel.check()?;
+            if !self
+                .db
+                .transition_job_state(&job.id, "running", "finalizing")?
+            {
+                return Err(OrchestratorError::Cancelled);
+            }
+
+            return self.finish_job(
+                job,
+                output_img,
+                output_alpha,
+                &loaded_input.metadata,
+                cancel,
+            );
+        }
+
+        let plan = TilePlan::build(width, height, tile_size, tile_overlap);
+        let total_tiles = plan.tiles.len();
+        if total_tiles == 0 {
+            return Err(OrchestratorError::Validation(
+                "Input image produced an empty tile plan".into(),
+            ));
+        }
+        let mut session = self.engine.load(&model_bytes, job.provider_id.as_deref())?;
         let mut blender =
             TileBlender::try_new_with_blend_mode(width, height, native_scale, blend_mode)?;
 
@@ -680,24 +781,10 @@ impl JobOrchestrator {
             return Err(OrchestratorError::Cancelled);
         }
 
-        let mut output_img = blender.finalize();
+        let output_img = blender.finalize();
 
-        // Resample alpha mask if present to match native upscale dimensions
-        let mut output_alpha = if let Some(ref alpha) = src_alpha {
-            let native_w = width
-                .checked_mul(native_scale)
-                .ok_or_else(|| OrchestratorError::Validation("Upscaled width overflowed".into()))?;
-            let native_h = height.checked_mul(native_scale).ok_or_else(|| {
-                OrchestratorError::Validation("Upscaled height overflowed".into())
-            })?;
-            Some(crate::pipeline::resample::resample_alpha_lanczos3(
-                alpha, native_w, native_h,
-            )?)
-        } else {
-            None
-        };
-
-        // Handle target scale (e.g. 2x requested on a 4x native model -> Lanczos3 downsample)
+        // Downsample when the requested scale is below the model's native one.
+        let mut output_img = output_img;
         if job.target_scale < native_scale {
             let target_w = width.checked_mul(job.target_scale).ok_or_else(|| {
                 OrchestratorError::Validation("Requested output width overflowed".into())
@@ -706,21 +793,33 @@ impl JobOrchestrator {
                 OrchestratorError::Validation("Requested output height overflowed".into())
             })?;
             output_img = downsample_lanczos3(&output_img, target_w, target_h)?;
-            if let Some(ref a) = output_alpha {
-                output_alpha = Some(crate::pipeline::resample::resample_alpha_lanczos3(
-                    a, target_w, target_h,
-                )?);
-            }
         }
 
-        // Parse configured output format
-        let serialized_format = job.output_format_json.as_deref().ok_or_else(|| {
-            OrchestratorError::Validation("Job is missing its output format".into())
-        })?;
-        let output_format: OutputFormat =
-            serde_json::from_str(serialized_format).map_err(|error| {
-                OrchestratorError::Validation(format!("Job has an invalid output format: {error}"))
-            })?;
+        // Alpha is tracked at source resolution and resampled once, straight to
+        // the final size.
+        let output_alpha = resample_alpha_to_scale(&src_alpha, width, height, job.target_scale)?;
+        self.finish_job(
+            job,
+            output_img,
+            output_alpha,
+            &loaded_input.metadata,
+            cancel,
+        )
+    }
+
+    /// Shared tail for both the single-pass and cascade paths: alpha resampling,
+    /// atomic commit, preview generation, and success persistence.
+    ///
+    /// `output_img` is already at the requested target scale.
+    fn finish_job(
+        &self,
+        job: &JobRecord,
+        output_img: RgbImage,
+        output_alpha: Option<GrayImage>,
+        source_metadata: &crate::pipeline::metadata::RawImageMetadata,
+        cancel: &CancellationToken,
+    ) -> Result<JobRecord, OrchestratorError> {
+        let output_format = output_format_from_job(job)?;
 
         // Generate output path
         let out_dir_buf = job
@@ -752,7 +851,7 @@ impl JobOrchestrator {
             &target_path,
             &output_format,
             Some(Path::new(&job.input_path)),
-            Some(&loaded_input.metadata),
+            Some(source_metadata),
             &self.metadata_policy(),
         )?;
         if let Err(error) = cancel.check() {
@@ -821,6 +920,62 @@ impl JobOrchestrator {
     }
 }
 
+fn output_format_from_job(job: &JobRecord) -> Result<OutputFormat, OrchestratorError> {
+    let serialized_format = job
+        .output_format_json
+        .as_deref()
+        .ok_or_else(|| OrchestratorError::Validation("Job is missing its output format".into()))?;
+    serde_json::from_str(serialized_format).map_err(|error| {
+        OrchestratorError::Validation(format!("Job has an invalid output format: {error}"))
+    })
+}
+
+/// Resamples the source alpha channel directly to the final output size.
+///
+/// Cascades never carry alpha through their passes; one resample at the end is
+/// both cheaper and avoids compounding interpolation error.
+fn resample_alpha_to_scale(
+    src_alpha: &Option<GrayImage>,
+    width: u32,
+    height: u32,
+    target_scale: u32,
+) -> Result<Option<GrayImage>, OrchestratorError> {
+    let Some(alpha) = src_alpha else {
+        return Ok(None);
+    };
+    let target_w = width
+        .checked_mul(target_scale)
+        .ok_or_else(|| OrchestratorError::Validation("Requested output width overflowed".into()))?;
+    let target_h = height.checked_mul(target_scale).ok_or_else(|| {
+        OrchestratorError::Validation("Requested output height overflowed".into())
+    })?;
+    Ok(Some(crate::pipeline::resample::resample_alpha_lanczos3(
+        alpha, target_w, target_h,
+    )?))
+}
+
+/// Persists cascade progress against the job record.
+struct JobProgressReporter<'a> {
+    db: &'a AppDatabase,
+    job_id: &'a str,
+}
+
+impl crate::pipeline::CascadeProgress for JobProgressReporter<'_> {
+    fn report(&mut self, fraction: f32, stage: &str) -> Result<(), PipelineError> {
+        // `update_job_progress` returns false when the job left the running
+        // state, which is how cancellation between tiles is observed.
+        let updated = self
+            .db
+            .update_job_progress(self.job_id, fraction, stage)
+            .map_err(|error| PipelineError::Validation(error.to_string()))?;
+        if updated {
+            Ok(())
+        } else {
+            Err(PipelineError::Cancelled)
+        }
+    }
+}
+
 fn default_models_root() -> PathBuf {
     std::env::var_os("RESVERA_MODELS_DIR")
         .map(PathBuf::from)
@@ -834,7 +989,12 @@ fn default_models_root() -> PathBuf {
 
 const MAX_INPUT_DIMENSION: u32 = 16_384;
 const MAX_INPUT_PIXELS: u64 = 67_108_864; // 64 Megapixels
-const MAX_OUTPUT_PIXELS: u64 = 268_435_456; // 256 Megapixels
+/// Hard ceiling on the working image the blend stage can composite.
+///
+/// This is derived from the blend buffer allocation rather than chosen
+/// independently: a limit looser than `MAX_BLEND_OUTPUT_PIXELS` lets a job pass
+/// preflight and then fail deep in the pipeline with an allocation error.
+const MAX_OUTPUT_PIXELS: u64 = crate::pipeline::MAX_BLEND_OUTPUT_PIXELS;
 
 fn validate_and_preflight_input_image(
     input: &str,
@@ -927,6 +1087,39 @@ fn normalize_provider(provider: Option<&str>) -> Result<String, OrchestratorErro
     Ok(provider)
 }
 
+/// Maximum number of inference passes a single job may chain.
+///
+/// Each pass roughly quadruples the working image, so this is a guard against
+/// pathological requests rather than a tuning knob.
+const MAX_CASCADE_PASSES: u32 = 4;
+
+/// Number of passes needed to reach `target_scale` from a `native_scale` model.
+///
+/// A 4x model reaches 8x in two passes (4x then 4x, giving 16x, downsampled to
+/// 8x by the cascade). Requests at or below the native scale need one pass.
+fn cascade_passes_for_scale(native_scale: u32, target_scale: u32) -> Result<u32, String> {
+    if target_scale == 0 {
+        return Err("Target scale must be greater than zero".into());
+    }
+    if native_scale == 0 {
+        return Err("Model variant declares a native scale of zero".into());
+    }
+    if target_scale <= native_scale {
+        return Ok(1);
+    }
+    let mut reached: u32 = native_scale;
+    let mut passes: u32 = 1;
+    while reached < target_scale {
+        reached = reached.checked_mul(native_scale).ok_or_else(|| {
+            format!("Scale {native_scale}x chained from {target_scale}x overflowed")
+        })?;
+        passes += 1;
+        if passes > MAX_CASCADE_PASSES {
+            break;
+        }
+    }
+    Ok(passes)
+}
 fn adapter_for_manifest(
     manifest: &ModelManifest,
     native_scale: u32,

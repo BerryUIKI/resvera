@@ -1,9 +1,36 @@
-use crate::adapter::{ModelAdapter, PipelineError};
+use crate::adapter::{ModelAdapter, PipelineError, TileConstraints};
 use crate::engine::{CancellationToken, InferenceEngine};
 use crate::pipeline::resample::downsample_lanczos3;
-use crate::pipeline::tiling::{TileBlender, TilePlan};
+use crate::pipeline::resample::resample_rgb_lanczos3;
+use crate::pipeline::tiling::{BlendMode, TileBlender, TilePlan, MAX_BLEND_OUTPUT_PIXELS};
 use image::RgbImage;
 use std::sync::Arc;
+
+/// One stage of a cascade: the weights to load plus the adapter and tiling
+/// rules derived from that model's manifest.
+pub struct CascadePass<'a> {
+    pub adapter: &'a dyn ModelAdapter,
+    pub weights: &'a [u8],
+    pub constraints: TileConstraints,
+    /// Native scale of the resolved variant, i.e. the ratio this pass applies.
+    pub native_scale: u32,
+}
+
+/// Progress reporting for a multi-pass job.
+///
+/// `fraction` is the completed fraction of the *whole* job across all passes.
+pub trait CascadeProgress {
+    fn report(&mut self, fraction: f32, stage: &str) -> Result<(), PipelineError>;
+}
+
+/// No-op progress sink for callers that do not persist progress.
+pub struct NoProgress;
+
+impl CascadeProgress for NoProgress {
+    fn report(&mut self, _fraction: f32, _stage: &str) -> Result<(), PipelineError> {
+        Ok(())
+    }
+}
 
 pub struct CascadePipeline {
     engine: Arc<dyn InferenceEngine>,
@@ -14,89 +41,229 @@ impl CascadePipeline {
         Self { engine }
     }
 
-    /// Executes an 8x cascade with custom model weights.
-    #[allow(clippy::too_many_arguments)]
-    pub fn run_8x_cascade_with_weights(
+    /// Total scale factor of a pass chain, e.g. `[4, 4]` -> 16.
+    pub fn total_scale(passes: &[CascadePass<'_>]) -> u32 {
+        passes.iter().map(|pass| pass.native_scale).product()
+    }
+
+    /// Output dimensions a pass chain produces from `width` x `height`.
+    pub fn output_dimensions(
+        passes: &[CascadePass<'_>],
+        width: u32,
+        height: u32,
+    ) -> Result<(u32, u32), PipelineError> {
+        let total = Self::total_scale(passes);
+        let w = width
+            .checked_mul(total)
+            .ok_or_else(|| PipelineError::Validation("Cascaded output width overflowed".into()))?;
+        let h = height
+            .checked_mul(total)
+            .ok_or_else(|| PipelineError::Validation("Cascaded output height overflowed".into()))?;
+        Ok((w, h))
+    }
+
+    /// Runs every pass in order and downsamples to `target_scale` with Lanczos3
+    /// when the chain overshoots it.
+    ///
+    /// Two models at 4x produce 16x, which is then reduced to the requested 8x.
+    /// This is why an 8x request costs far more than twice a 4x request: the peak
+    /// working image is the *final pass* output, not the requested size.
+    pub fn run(
         &self,
         src_img: &RgbImage,
-        adapter_pass1: &dyn ModelAdapter,
-        weights_pass1: &[u8],
-        adapter_pass2: &dyn ModelAdapter,
-        weights_pass2: &[u8],
+        passes: &[CascadePass<'_>],
         target_scale: u32,
+        blend_mode: BlendMode,
         cancel: &CancellationToken,
+        progress: &mut dyn CascadeProgress,
     ) -> Result<RgbImage, PipelineError> {
+        if passes.is_empty() {
+            return Err(PipelineError::Validation(
+                "A cascade requires at least one pass".into(),
+            ));
+        }
+        if target_scale == 0 {
+            return Err(PipelineError::Validation(
+                "Target scale must be greater than zero".into(),
+            ));
+        }
         cancel.check()?;
 
-        // --- PASS 1: 4x Super-Resolution ---
-        let (w1, h1) = src_img.dimensions();
-        let plan1 = TilePlan::build(w1, h1, 32, 8);
-        let mut session1 = self.engine.load(weights_pass1, None)?;
-        let mut blender1 = TileBlender::try_new(w1, h1, 4)?;
+        let (src_w, src_h) = src_img.dimensions();
+        let total_scale = Self::total_scale(passes);
+        let (full_w, full_h) = Self::output_dimensions(passes, src_w, src_h)?;
 
-        for tile in &plan1.tiles {
+        // The peak working buffer is the full chain output, not the requested
+        // size, because downsampling happens only after the last pass.
+        let peak_pixels = (full_w as u64) * (full_h as u64);
+        if peak_pixels > MAX_BLEND_OUTPUT_PIXELS {
+            return Err(PipelineError::Validation(format!(
+                "A {total_scale}x cascade from {src_w}x{src_h} needs a {full_w}x{full_h} working \
+                 buffer ({peak_pixels} pixels), which exceeds the {MAX_BLEND_OUTPUT_PIXELS} pixel \
+                 blending limit. Use a smaller input image or fewer cascade passes."
+            )));
+        }
+
+        // Total tiles across all passes, so progress reflects the whole job
+        // rather than restarting at each pass. Each pass is planned against the
+        // previous pass's output dimensions.
+        let mut pass_tiles: Vec<usize> = Vec::with_capacity(passes.len());
+        let mut dimensions = (src_w, src_h);
+        for pass in passes {
+            let tile_size = default_tile_size(pass.constraints);
+            let plan = TilePlan::build(
+                dimensions.0,
+                dimensions.1,
+                tile_size,
+                pass.constraints.overlap,
+            );
+            pass_tiles.push(plan.tiles.len());
+            dimensions = (
+                dimensions
+                    .0
+                    .checked_mul(pass.native_scale)
+                    .ok_or_else(|| PipelineError::Validation("Cascaded width overflowed".into()))?,
+                dimensions.1.checked_mul(pass.native_scale).ok_or_else(|| {
+                    PipelineError::Validation("Cascaded height overflowed".into())
+                })?,
+            );
+        }
+        let total_units = pass_tiles.iter().sum::<usize>().max(1) as f32;
+
+        let mut current = src_img.clone();
+        let mut completed_units = 0.0f32;
+
+        for (index, pass) in passes.iter().enumerate() {
             cancel.check()?;
-            let mut tile_img = RgbImage::new(tile.width, tile.height);
-            for ty in 0..tile.height {
-                for tx in 0..tile.width {
-                    tile_img.put_pixel(tx, ty, *src_img.get_pixel(tile.x + tx, tile.y + ty));
-                }
+
+            let (in_w, in_h) = current.dimensions();
+            let tile_size = default_tile_size(pass.constraints);
+            let overlap = pass.constraints.overlap;
+            validate_tile_params(tile_size, overlap, pass.constraints, index)?;
+
+            let plan = TilePlan::build(in_w, in_h, tile_size, overlap);
+            if plan.tiles.is_empty() {
+                return Err(PipelineError::Validation(format!(
+                    "Cascade pass {} produced an empty tile plan",
+                    index + 1
+                )));
             }
 
-            let in_tensor = adapter_pass1.preprocess(&tile_img)?;
-            let out_tensor = self.engine.run(&mut *session1, in_tensor.view(), cancel)?;
-            let out_tile = adapter_pass1.postprocess(&out_tensor)?;
-            blender1.blend_tile(tile, &out_tile, plan1.overlap);
-        }
+            let mut session = self
+                .engine
+                .load(pass.weights, None)
+                .map_err(PipelineError::from)?;
+            let mut blender =
+                TileBlender::try_new_with_blend_mode(in_w, in_h, pass.native_scale, blend_mode)?;
 
-        let pass1_img = blender1.finalize();
-        cancel.check()?;
+            for tile_rect in plan.tiles.iter() {
+                cancel.check()?;
 
-        // --- PASS 2: 2x Super-Resolution (giving 4x * 2x = 8x total) ---
-        let (w2, h2) = pass1_img.dimensions();
-        let plan2 = TilePlan::build(w2, h2, 32, 8);
-        let mut session2 = self.engine.load(weights_pass2, None)?;
-        let mut blender2 = TileBlender::try_new(w2, h2, 2)?;
-
-        for tile in &plan2.tiles {
-            cancel.check()?;
-            let mut tile_img = RgbImage::new(tile.width, tile.height);
-            for ty in 0..tile.height {
-                for tx in 0..tile.width {
-                    tile_img.put_pixel(tx, ty, *pass1_img.get_pixel(tile.x + tx, tile.y + ty));
+                let mut tile_img = RgbImage::new(tile_rect.width, tile_rect.height);
+                for ty in 0..tile_rect.height {
+                    for tx in 0..tile_rect.width {
+                        tile_img.put_pixel(
+                            tx,
+                            ty,
+                            *current.get_pixel(tile_rect.x + tx, tile_rect.y + ty),
+                        );
+                    }
                 }
+
+                let in_tensor = pass.adapter.preprocess(&tile_img)?;
+                let out_tensor = self.engine.run(&mut *session, in_tensor.view(), cancel)?;
+                let mut out_tile = pass.adapter.postprocess(&out_tensor)?;
+
+                // Adapters may pad or crop; force the tile to the exact size the
+                // blender expects before compositing.
+                let expected_w = tile_rect
+                    .width
+                    .checked_mul(pass.native_scale)
+                    .ok_or_else(|| PipelineError::Validation("Tile width overflowed".into()))?;
+                let expected_h = tile_rect
+                    .height
+                    .checked_mul(pass.native_scale)
+                    .ok_or_else(|| PipelineError::Validation("Tile height overflowed".into()))?;
+                if out_tile.width() != expected_w || out_tile.height() != expected_h {
+                    out_tile = resample_rgb_lanczos3(&out_tile, expected_w, expected_h)?;
+                }
+
+                blender.blend_tile(tile_rect, &out_tile, overlap);
+
+                completed_units += 1.0;
+                progress.report(
+                    (completed_units / total_units) * 0.95,
+                    &format!(
+                        "cascade pass {}/{} (tile {}/{})",
+                        index + 1,
+                        passes.len(),
+                        tile_rect.y / tile_size.max(1) + 1,
+                        plan.tiles.len()
+                    ),
+                )?;
             }
 
-            let in_tensor = adapter_pass2.preprocess(&tile_img)?;
-            let out_tensor = self.engine.run(&mut *session2, in_tensor.view(), cancel)?;
-            let out_tile = adapter_pass2.postprocess(&out_tensor)?;
-            blender2.blend_tile(tile, &out_tile, plan2.overlap);
+            current = blender.finalize();
+            cancel.check()?;
         }
 
-        let mut final_8x_img = blender2.finalize();
-        cancel.check()?;
-
-        // If target scale is not 8 (e.g. 6x requested via 8x cascade), downsample via Lanczos3
-        if target_scale != 8 {
-            let tw = (w1 * target_scale).max(1);
-            let th = (h1 * target_scale).max(1);
-            final_8x_img = downsample_lanczos3(&final_8x_img, tw, th)?;
+        // The chain may overshoot the request (4x + 4x = 16x for an 8x job).
+        if total_scale != target_scale {
+            let tw = src_w.checked_mul(target_scale).ok_or_else(|| {
+                PipelineError::Validation("Requested output width overflowed".into())
+            })?;
+            let th = src_h.checked_mul(target_scale).ok_or_else(|| {
+                PipelineError::Validation("Requested output height overflowed".into())
+            })?;
+            cancel.check()?;
+            current = if target_scale < total_scale {
+                downsample_lanczos3(&current, tw, th)?
+            } else {
+                resample_rgb_lanczos3(&current, tw, th)?
+            };
         }
 
-        Ok(final_8x_img)
+        progress.report(1.0, "finalizing")?;
+        Ok(current)
     }
+}
 
-    /// A cascade cannot run without two explicitly selected and verified model artifacts.
-    pub fn run_8x_cascade(
-        &self,
-        _src_img: &RgbImage,
-        _adapter_pass1: &dyn ModelAdapter,
-        _adapter_pass2: &dyn ModelAdapter,
-        _target_scale: u32,
-        _cancel: &CancellationToken,
-    ) -> Result<RgbImage, PipelineError> {
-        Err(PipelineError::Validation(
-            "8x cascade requires two explicitly verified model artifacts".into(),
-        ))
+/// Tile size for a pass, derived from the model's own constraints.
+fn default_tile_size(constraints: TileConstraints) -> u32 {
+    let requested = constraints.recommended.max(constraints.minimum);
+    round_up_to_alignment(requested, constraints.alignment)
+}
+
+fn round_up_to_alignment(value: u32, alignment: u32) -> u32 {
+    if alignment <= 1 {
+        return value;
     }
+    let remainder = value % alignment;
+    if remainder == 0 {
+        value
+    } else {
+        value + (alignment - remainder)
+    }
+}
+
+fn validate_tile_params(
+    tile_size: u32,
+    overlap: u32,
+    constraints: TileConstraints,
+    pass_index: usize,
+) -> Result<(), PipelineError> {
+    if tile_size < constraints.minimum {
+        return Err(PipelineError::Validation(format!(
+            "Cascade pass {}: tile size {tile_size} is below the model minimum of {}",
+            pass_index + 1,
+            constraints.minimum
+        )));
+    }
+    if overlap >= tile_size {
+        return Err(PipelineError::Validation(format!(
+            "Cascade pass {}: overlap {overlap} must be smaller than the tile size {tile_size}",
+            pass_index + 1
+        )));
+    }
+    Ok(())
 }

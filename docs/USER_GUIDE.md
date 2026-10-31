@@ -33,8 +33,8 @@ Resvera 是一款支持全平台、纯离线运行的高性能 AI 图像超分�
 
 | Model Name / 模型名称 | Architecture / 架构 | Scales / 支持倍率 | Status / 状态 | Ideal For / 推荐场景 |
 |---|---|---|---|---|
-| **Real-ESRGAN x4plus** | RRDB | 4x (1x, 2x via Lanczos3) | ✅ *Export & CPU parity validated; import a signed package* | Real-world photography, landscapes, portraits (真实摄影与风景) |
-| **Real-ESRGAN x4plus Anime (6B)** | RRDB-6B | 4x (1x, 2x via Lanczos3) | ✅ *Export & CPU parity validated; import a signed package* | Anime, digital illustration, line art (二次元插画与动漫) |
+| **Real-ESRGAN x4plus** | RRDB | 4x (1x/2x via Lanczos3; 8x via two passes) | ✅ *Export & CPU parity validated; import a signed package* | Real-world photography, landscapes, portraits (真实摄影与风景) |
+| **Real-ESRGAN x4plus Anime (6B)** | RRDB-6B | 4x (1x/2x via Lanczos3; 8x via two passes) | ✅ *Export & CPU parity validated; import a signed package* | Anime, digital illustration, line art (二次元插画与动漫) |
 | **Real-CUGAN 2x / 4x** | CUGAN | 2x, 4x | ⏳ *Library adapter only; not in the signed catalog* | Anime with customizable denoise levels (动漫高精度降噪与线稿) |
 | **Real-HAT-GAN 4x** | Transformer (HAT) | 4x | ⏳ *Library adapter only; not in the signed catalog* | Ultra-detail hybrid attention restoration (混合注意力高精还原) |
 

@@ -107,7 +107,7 @@ Performance budgets must be stored with exact hardware, operating system, driver
 - [x] `preserveSafe` updates or removes orientation, dimensions, and embedded thumbnails correctly. *(Implemented & verified in [#52](https://github.com/BerryUIKI/resvera/issues/52))*
 - [x] GPS metadata is preserved only when both metadata preservation and GPS preservation are enabled. *(Implemented & verified in [#52](https://github.com/BerryUIKI/resvera/issues/52))*
 - [x] A 4x model with a 2x target produces exact 2x dimensions and reports the resize stage.
-- [ ] An 8x cascade produces exact dimensions, remains cancellable across passes, and makes no unsupported runtime estimate claim. *(Core engine logic implemented; UI workflow and automated tests tracked by [#61](https://github.com/BerryUIKI/resvera/issues/61))*
+- [x] An 8x cascade produces exact dimensions, remains cancellable across passes, and makes no unsupported runtime estimate claim. *(Wired into the orchestrator in [#95](https://github.com/BerryUIKI/resvera/issues/95); bounded by the blend-buffer budget, so large inputs are rejected at submit time)*
 
 ## 5. Milestone 3: HAT and Runtime Maturity
 

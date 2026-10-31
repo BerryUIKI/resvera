@@ -90,7 +90,7 @@ Dependency direction is strictly `core → models/persistence`, `engine-ort → 
 
 ## Claims discipline
 
-This repo treats unsupported capability claims as defects. `docs/ROADMAP.md` §10 is the pre-release checklist: nothing may be described as supported in README, UI, user guide, or comments without committed evidence (hardware parity reports, signed model packages, automated metadata tests). Real-CUGAN and Real-HAT-GAN have core adapters but no validated package, so they are excluded from the production catalog entirely and must be described as library-only. `CascadePipeline` (8x) is likewise library-only — job validation rejects `target_scale > native_scale` and the UI offers 1x/2x/4x. Test counts in docs must match `cargo test --workspace`, not estimates.
+This repo treats unsupported capability claims as defects. `docs/ROADMAP.md` §10 is the pre-release checklist: nothing may be described as supported in README, UI, user guide, or comments without committed evidence (hardware parity reports, signed model packages, automated metadata tests). Real-CUGAN and Real-HAT-GAN have core adapters but no validated package, so they are excluded from the production catalog entirely and must be described as library-only. 8x is wired through the orchestrator as a repeated-pass cascade, but it is bounded by `MAX_BLEND_OUTPUT_PIXELS` (33.5 MP), so only small inputs can use it — keep that stated. Test counts in docs must match `cargo test --workspace`, not estimates.
 
 Authoritative docs to consult before changing behavior: `docs/ARCHITECTURE.md`, `docs/API_AND_IPC_SPEC.md`, `docs/MODELS_SPEC.md`, `docs/SECURITY.md`, `docs/RELEASE_SECURITY.md`, and `docs/adr/`.
 
