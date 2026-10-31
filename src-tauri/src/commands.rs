@@ -383,6 +383,7 @@ pub fn list_models_impl(models_root: &Path) -> Vec<ModelSummary> {
                         strength: v.strength,
                     })
                     .collect(),
+                installable: !entry.download_urls.is_empty(),
             }
         })
         .collect()

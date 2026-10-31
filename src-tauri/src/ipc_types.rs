@@ -93,6 +93,10 @@ pub struct ModelSummary {
     pub redistribution_review: String,
     pub validated_providers: Vec<String>,
     pub variants: Vec<ModelVariantSummary>,
+    /// True when the catalog declares at least one installable artifact URL.
+    /// The Model Center hides the download action when this is false, so it
+    /// never offers a download that is guaranteed to fail.
+    pub installable: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -2,9 +2,13 @@ use crate::signing::{sign_payload, verify_signature_hex, SigningError};
 use serde::{Deserialize, Serialize};
 
 /// Pinned Ed25519 public key (trust root) for official Resvera model catalog and package signing.
+///
+/// Rotated on 2026-11-01 because the previous seed was committed in plaintext in
+/// the test suite. The production signing seed is held out-of-tree; see
+/// `tools/catalog-sign/README.md` for the rotation and signing procedure.
 pub const RESVERA_PRODUCTION_TRUST_ROOT: [u8; 32] = [
-    60, 203, 206, 138, 209, 140, 163, 111, 177, 7, 63, 217, 217, 140, 222, 195, 169, 195, 55, 136,
-    63, 96, 255, 4, 101, 159, 44, 6, 253, 62, 108, 94,
+    248, 210, 130, 19, 134, 62, 145, 99, 81, 82, 79, 53, 12, 100, 11, 235, 15, 29, 40, 226, 37,
+    112, 50, 170, 226, 157, 60, 68, 226, 190, 133, 191,
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

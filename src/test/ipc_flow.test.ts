@@ -62,6 +62,7 @@ describe("Tauri IPC Critical Paths Flow", () => {
           licenseSpdx: "BSD-3-Clause",
           redistributionReview: "approved",
           validatedProviders: ["cpu"],
+          installable: false,
           variants: [{ id: "default", nativeScale: 4, strength: null }],
         },
       ],

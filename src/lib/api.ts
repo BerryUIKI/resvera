@@ -76,95 +76,61 @@ export async function getRuntimeStatus(): Promise<RuntimeStatus> {
   };
 }
 
+/**
+ * Browser-preview catalog mirror.
+ *
+ * This must reflect `crates/resvera-models/src/catalogs/production.json`: the
+ * same model set, provider claims, and installability. Real-CUGAN and
+ * Real-HAT-GAN have core adapters but no validated package, so they are absent
+ * here just as they are absent from the signed catalog.
+ */
+const BROWSER_CATALOG: ModelSummary[] = [
+  {
+    id: "realesrgan-x4plus",
+    packageVersion: "1.0.0",
+    displayName: "Real-ESRGAN x4plus",
+    family: "rrdb",
+    category: "photo",
+    nativeScales: [4],
+    installed: false,
+    updateAvailable: false,
+    downloadSizeBytes: "67051644",
+    licenseSpdx: "BSD-3-Clause",
+    redistributionReview: "approved",
+    validatedProviders: ["cpu"],
+    variants: [{ id: "default", nativeScale: 4, strength: null }],
+    installable: false,
+  },
+  {
+    id: "realesrgan-x4plus-anime",
+    packageVersion: "1.0.0",
+    displayName: "Real-ESRGAN x4plus Anime (6B)",
+    family: "rrdb-6b",
+    category: "anime",
+    nativeScales: [4],
+    installed: false,
+    updateAvailable: false,
+    downloadSizeBytes: "17939969",
+    licenseSpdx: "BSD-3-Clause",
+    redistributionReview: "approved",
+    validatedProviders: ["cpu"],
+    variants: [{ id: "default", nativeScale: 4, strength: null }],
+    installable: false,
+  },
+];
+
 export async function listModels(): Promise<ModelSummary[]> {
   if (isTauri()) {
     return await invoke<ModelSummary[]>("list_models");
   }
-  return [
-    {
-      id: "realesrgan-x4plus",
-      packageVersion: "1.0.0",
-      displayName: "Real-ESRGAN x4plus",
-      family: "rrdb",
-      category: "photo",
-      nativeScales: [4],
-      installed: false,
-      updateAvailable: false,
-      downloadSizeBytes: "67051644",
-      licenseSpdx: "BSD-3-Clause",
-      redistributionReview: "approved",
-      validatedProviders: ["cpu", "directml", "coreml"],
-      variants: [{ id: "default", nativeScale: 4, strength: null }],
-    },
-    {
-      id: "realesrgan-x4plus-anime",
-      packageVersion: "1.0.0",
-      displayName: "Real-ESRGAN x4plus Anime (6B)",
-      family: "rrdb-6b",
-      category: "anime",
-      nativeScales: [4],
-      installed: false,
-      updateAvailable: false,
-      downloadSizeBytes: "17939969",
-      licenseSpdx: "BSD-3-Clause",
-      redistributionReview: "approved",
-      validatedProviders: ["cpu", "directml", "coreml"],
-      variants: [{ id: "default", nativeScale: 4, strength: null }],
-    },
-    {
-      id: "real-cugan-2x",
-      packageVersion: "1.0.0",
-      displayName: "Real-CUGAN 2x",
-      family: "cugan",
-      category: "anime",
-      nativeScales: [2],
-      installed: false,
-      updateAvailable: false,
-      downloadSizeBytes: "15204812",
-      licenseSpdx: "MIT",
-      redistributionReview: "approved",
-      validatedProviders: ["cpu", "directml"],
-      variants: [
-        { id: "no-denoise", nativeScale: 2, strength: "-1" },
-        { id: "denoise-1", nativeScale: 2, strength: "1" },
-        { id: "denoise-2", nativeScale: 2, strength: "2" },
-        { id: "denoise-3", nativeScale: 2, strength: "3" },
-      ],
-    },
-    {
-      id: "real-cugan-4x",
-      packageVersion: "1.0.0",
-      displayName: "Real-CUGAN 4x",
-      family: "cugan",
-      category: "anime",
-      nativeScales: [4],
-      installed: false,
-      updateAvailable: false,
-      downloadSizeBytes: "28145290",
-      licenseSpdx: "MIT",
-      redistributionReview: "approved",
-      validatedProviders: ["cpu", "directml"],
-      variants: [
-        { id: "no-denoise", nativeScale: 4, strength: "-1" },
-        { id: "denoise-3", nativeScale: 4, strength: "3" },
-      ],
-    },
-    {
-      id: "real-hat-gan-4x",
-      packageVersion: "1.0.0",
-      displayName: "Real-HAT-GAN 4x",
-      family: "hat",
-      category: "photo",
-      nativeScales: [4],
-      installed: false,
-      updateAvailable: false,
-      downloadSizeBytes: "76483920",
-      licenseSpdx: "Apache-2.0",
-      redistributionReview: "approved",
-      validatedProviders: ["cpu", "directml", "cuda"],
-      variants: [{ id: "default", nativeScale: 4, strength: null }],
-    },
-  ];
+  // Deep-copy so callers mutating the result (e.g. the install stub) cannot
+  // corrupt the shared catalog.
+  return BROWSER_CATALOG.map((model) => ({
+    ...model,
+    nativeScales: [...model.nativeScales],
+    validatedProviders: [...model.validatedProviders],
+    variants: model.variants.map((variant) => ({ ...variant })),
+  }));
 }
 
 export async function loadSettings(): Promise<AppSettings> {

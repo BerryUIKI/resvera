@@ -178,5 +178,8 @@ export const en = {
     importLocal: "Import ONNX File",
     cancelDownload: "Cancel Download",
     importSuccess: "Model imported and verified successfully.",
+    noPublishedArtifact: "No published package",
+    noPublishedArtifactHint:
+      "This model has no verified package published yet. Import a signed ONNX package to use it offline.",
   },
 };

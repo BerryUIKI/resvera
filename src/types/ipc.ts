@@ -75,6 +75,8 @@ export interface ModelSummary {
   redistributionReview: "approved" | "pending" | "rejected";
   validatedProviders: string[];
   variants: ModelVariantSummary[];
+  /** False when no artifact has been published yet; the UI hides "Download". */
+  installable: boolean;
 }
 
 export interface ModelVariantSummary {

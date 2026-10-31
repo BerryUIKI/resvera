@@ -30,3 +30,7 @@ Thumbs.db
 .vscode/
 .idea/
 
+
+# Catalog signing key material — never commit seeds or key files.
+*.seed
+catalog-seed*.hex
