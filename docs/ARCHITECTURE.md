@@ -177,8 +177,7 @@ Progress is reported by completed tile weight, not by parsing runtime console ou
 
 - A native model scale is preferred.
 - A target below the native scale runs once at native scale and then uses Lanczos3 downsampling.
-- An 8x request on a 4x-only model runs two 4x passes to produce 16x and then downsamples to 8x.
-- Cascade work is represented as multiple pipeline stages and is not expected to take only twice as long as a single pass.
+- `CascadePipeline` can express a two-pass cascade (e.g. two 4x passes producing 16x, then Lanczos3 downsampling to 8x), but it is currently **library-only**: job validation rejects `target_scale > native_scale` and the UI offers only 1x/2x/4x. Cascade work is represented as multiple pipeline stages and is not expected to take only twice as long as a single pass.
 
 ## 5. Job Queue and Lifecycle
 

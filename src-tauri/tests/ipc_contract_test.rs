@@ -86,7 +86,10 @@ fn test_ipc_commands_workflow() {
 
     // 2. List models with verified installer state
     let models = list_models_impl(&models_root);
-    assert_eq!(models.len(), 5);
+    // The production catalog ships only packages that passed export and parity
+    // validation. Real-CUGAN and Real-HAT-GAN are intentionally absent until
+    // their packages exist (see `production_catalog_contract_test.rs`).
+    assert_eq!(models.len(), 2);
     assert_eq!(models[0].id, "realesrgan-x4plus");
     assert!(models[0].installed); // Installed via verified test model fixture!
     assert!(!models[1].installed); // Not installed

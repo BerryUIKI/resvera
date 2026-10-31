@@ -178,5 +178,7 @@ export const zh = {
     importLocal: "导入本地 ONNX",
     cancelDownload: "取消下载",
     importSuccess: "模型导入并校验成功。",
+    noPublishedArtifact: "暂无已发布模型包",
+    noPublishedArtifactHint: "该模型尚未发布经过校验的模型包。可导入已签名的 ONNX 模型包以离线使用。",
   },
 };

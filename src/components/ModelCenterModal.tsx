@@ -133,17 +133,30 @@ export const ModelCenterModal: Component<ModelCenterModalProps> = (props) => {
                       </div>
                     ) : (
                       <div class="flex items-center space-x-2">
-                        <button
-                          onClick={() => handleInstall(model.id)}
-                          disabled={Boolean(props.installingModelId)}
-                          class={`px-4 py-1.5 text-xs font-semibold rounded-lg shadow-md transition ${
-                            props.installingModelId
-                              ? "bg-slate-700 text-slate-400 cursor-not-allowed opacity-60"
-                              : "bg-sky-500 hover:bg-sky-400 text-slate-950"
-                          }`}
-                        >
-                          <span>{t("modelCenter.download")}</span>
-                        </button>
+                        {/* Offer Download only when the catalog actually
+                            publishes a verified artifact; otherwise the import
+                            path is the sole way to install this model. */}
+                        <Show when={model.installable}>
+                          <button
+                            onClick={() => handleInstall(model.id)}
+                            disabled={Boolean(props.installingModelId)}
+                            class={`px-4 py-1.5 text-xs font-semibold rounded-lg shadow-md transition ${
+                              props.installingModelId
+                                ? "bg-slate-700 text-slate-400 cursor-not-allowed opacity-60"
+                                : "bg-sky-500 hover:bg-sky-400 text-slate-950"
+                            }`}
+                          >
+                            <span>{t("modelCenter.download")}</span>
+                          </button>
+                        </Show>
+                        <Show when={!model.installable}>
+                          <span
+                            title={t("modelCenter.noPublishedArtifactHint")}
+                            class="px-3 py-1.5 text-[11px] rounded-lg bg-slate-800/60 text-slate-400 border border-slate-700"
+                          >
+                            {t("modelCenter.noPublishedArtifact")}
+                          </span>
+                        </Show>
                         <button
                           onClick={() => props.onImportModel?.(model.id)}
                           disabled={Boolean(props.installingModelId)}

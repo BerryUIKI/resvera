@@ -166,14 +166,18 @@ fn test_staged_download_and_hash_enforcement() {
 
 #[test]
 fn test_generate_and_verify_production_catalog() {
-    let seed: [u8; 32] = [
-        0x52, 0x65, 0x73, 0x76, 0x65, 0x72, 0x61, 0x54, 0x72, 0x75, 0x73, 0x74, 0x52, 0x6f, 0x6f,
-        0x74, 0x32, 0x30, 0x32, 0x36, 0x50, 0x72, 0x6f, 0x64, 0x4d, 0x6f, 0x64, 0x65, 0x6c, 0x53,
-        0x69, 0x67,
-    ];
+    // A throwaway keypair. This test exercises catalog construction and signing
+    // only; it must never use, derive, or assert on the production trust root.
+    // The committed production catalog is verified against the pinned root by
+    // `tests/production_catalog_contract_test.rs`.
+    let seed = [0x5au8; 32];
     let signing_key = SigningKey::from_bytes(&seed);
     let public_key = signing_key.verifying_key().to_bytes();
-    assert_eq!(public_key, resvera_models::RESVERA_PRODUCTION_TRUST_ROOT);
+    assert_ne!(
+        public_key,
+        resvera_models::RESVERA_PRODUCTION_TRUST_ROOT,
+        "test fixtures must not reuse the production signing key"
+    );
 
     struct Spec {
         id: &'static str,
@@ -396,12 +400,24 @@ fn test_generate_and_verify_production_catalog() {
 
     let catalog_json = serde_json::to_string_pretty(&catalog).unwrap();
 
-    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let catalogs_dir = manifest_dir.join("src").join("catalogs");
-    std::fs::create_dir_all(&catalogs_dir).unwrap();
-    let catalog_path = catalogs_dir.join("production.json");
+    // Verify the generated catalog round-trips, but never write into the source
+    // tree. Regenerating `src/catalogs/production.json` from this test's own
+    // constants would let catalog drift pass CI, because the test would be
+    // asserting on the output it just produced. The committed catalog is
+    // validated against the pinned trust root by
+    // `tests/production_catalog_contract_test.rs` instead.
+    let scratch = tempfile::tempdir().expect("create scratch directory");
+    let catalog_path = scratch.path().join("production.json");
     std::fs::write(&catalog_path, &catalog_json).unwrap();
-    println!("Wrote production catalog to {}", catalog_path.display());
+
+    let reloaded: resvera_models::ModelCatalog = serde_json::from_str(
+        &std::fs::read_to_string(&catalog_path).expect("read back generated catalog"),
+    )
+    .expect("generated catalog must deserialize");
+    assert_eq!(reloaded.models.len(), catalog.models.len());
+    reloaded
+        .verify(&public_key)
+        .expect("generated catalog must verify after round-trip");
 }
 
 #[test]
@@ -409,12 +425,11 @@ fn test_load_production_catalog_success() {
     let catalog =
         resvera_models::load_production_catalog().expect("Production catalog must verify cleanly");
     assert_eq!(catalog.catalog_version, 1);
-    assert_eq!(catalog.models.len(), 5);
+    // Only packages with a validated, reproducible export ship. Real-CUGAN and
+    // Real-HAT-GAN remain absent until their artifacts are published.
+    assert_eq!(catalog.models.len(), 2);
     assert_eq!(catalog.models[0].id, "realesrgan-x4plus");
     assert_eq!(catalog.models[1].id, "realesrgan-x4plus-anime");
-    assert_eq!(catalog.models[2].id, "real-cugan-2x");
-    assert_eq!(catalog.models[3].id, "real-cugan-4x");
-    assert_eq!(catalog.models[4].id, "real-hat-gan-4x");
 }
 
 #[test]

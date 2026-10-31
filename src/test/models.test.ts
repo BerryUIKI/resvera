@@ -16,6 +16,7 @@ describe("Model Center State & Installation Behavior", () => {
       licenseSpdx: "BSD-3-Clause",
       redistributionReview: "approved",
       validatedProviders: ["cpu"],
+      installable: false,
       variants: [{ id: "default", nativeScale: 4, strength: null }],
     },
     {
@@ -31,6 +32,7 @@ describe("Model Center State & Installation Behavior", () => {
       licenseSpdx: "BSD-3-Clause",
       redistributionReview: "approved",
       validatedProviders: ["cpu"],
+      installable: false,
       variants: [{ id: "default", nativeScale: 4, strength: null }],
     },
   ];

@@ -15,9 +15,10 @@ Resvera is an open-source desktop image upscaler and restoration application bui
 
 - ⚡ **Pure Offline AI Super-Resolution**: 100% local image upscaling with zero network dependencies during processing.
 - 🎯 **Supported Models**:
-  - **Real-ESRGAN x4plus** (RRDB, Photography) — *Available & Validated*
-  - **Real-ESRGAN x4plus Anime** (RRDB-6B, Anime / Illustrations) — *Available & Validated*
-  - **Real-CUGAN 2x / 4x** & **Real-HAT-GAN 4x** — *Core adapters implemented in library; model packages pending export validation ([#68](https://github.com/BerryUIKI/resvera/issues/68))*
+  - **Real-ESRGAN x4plus** (RRDB, Photography) — *Export and CPU parity validated; no public package is published yet*
+  - **Real-ESRGAN x4plus Anime** (RRDB-6B, Anime / Illustrations) — *Export and CPU parity validated; no public package is published yet*
+  - **Real-CUGAN 2x / 4x** & **Real-HAT-GAN 4x** — *Core adapters implemented in library; not present in the signed catalog until a validated package exists*
+  - Packages are installed by importing a signed ONNX model package in the Model Center. The catalog currently publishes no download URLs, so the Model Center does not offer a download that would fail.
 - 🚀 **Hardware Acceleration & Execution Providers**:
   - **CPU (SIMD)**: 100% verified cross-platform baseline across Windows, macOS, and Linux.
   - **DirectML / CoreML / CUDA / OpenVINO**: Architecturally integrated, but fail-closed and disabled in production pending physical hardware test evidence ([#68](https://github.com/BerryUIKI/resvera/issues/68)).
@@ -50,11 +51,11 @@ Resvera is an open-source desktop image upscaler and restoration application bui
 |---|---|---|---|
 | **Offline Inference Pipeline** | ✅ Implemented | ✅ Shipped | Production ready |
 | **RRDB (Real-ESRGAN) Adapter** | ✅ Implemented | ✅ Shipped | Validated with CPU inference |
-| **CUGAN / HAT Adapters** | ✅ Implemented | ⏳ Pending Models | Tracked by [#68](https://github.com/BerryUIKI/resvera/issues/68) |
+| **CUGAN / HAT Adapters** | ✅ Implemented | ⏳ Not in catalog | Excluded from the signed catalog until a validated package exists |
 | **Metadata / ICC Preservation** | ✅ Implemented | ✅ Shipped | Fully verified (JPEG/PNG) ([#52](https://github.com/BerryUIKI/resvera/issues/52)) |
 | **Persistent Queue & Recovery** | ✅ Implemented | ✅ Shipped | SQLite crash-consistent queue |
-| **Model Center Crypto & Staging** | ✅ Implemented | ⏳ Pending Catalog | Engine verified; catalog hosting tracked by [#68](https://github.com/BerryUIKI/resvera/issues/68) |
-| **8x Multi-pass Cascading** | ✅ Implemented | ⏳ In Testing | Tracked by [#61](https://github.com/BerryUIKI/resvera/issues/61) |
+| **Model Center Crypto & Staging** | ✅ Implemented | ⏳ No published packages | Local import and signature verification work; no artifact is published for download yet |
+| **8x Multi-pass Cascading** | ✅ Implemented | ❌ Not wired | `CascadePipeline` is library-only; job validation and UI do not offer 8x |
 | **Release Signing & Auto-Updater** | ⏳ In Progress | ⏳ In Progress | Tracked by [#58](https://github.com/BerryUIKI/resvera/issues/58) |
 
 ---
