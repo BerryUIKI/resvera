@@ -11,11 +11,11 @@
       "description": "Official Real-ESRGAN x4plus general photo restoration model",
       "license_spdx": "BSD-3-Clause",
       "redistribution_review": "approved",
-      "size_bytes": 67051644,
-      "sha256": "aecc663c9d74f1c4c1a7534833dc2629091a0ae8bd5d89056ebbc0d9ffae30fb",
-      "manifest_sha256": "58da157d065456cd1e384707ab3748265aaefcf16b54e06a33be166beceb3bae",
+      "size_bytes": 67051643,
+      "sha256": "1d276713aa9cd034c9d973580f773954ca988fb9b0e040e370564e353f1c30d2",
+      "manifest_sha256": "ddefd71be60e52a701e2681226c4178390501cb68dd303410adf520455b5ef3e",
       "download_urls": [],
-      "signature": "bb4cdb9b1eb15cbbd74b4311e0b5c2a60cb4218fb272bfaa6f9818890027a03baf4fa9f4f678067bd1867e25d0b97ac480827a1eaba6b2faec344c73a066e707",
+      "signature": "f0f05b77fbfe177203c3b33a6f82815f466bf608de30fc73f26c9364bbfe6b82e544e026c91294935cf63dbcab34d7620a224c882911aa55ffb9374b6927de07",
       "native_scales": [
         4
       ],
@@ -29,7 +29,7 @@
           "strength": null
         }
       ],
-      "manifest_template": "{\n  \"schema_version\": 1,\n  \"id\": \"realesrgan-x4plus\",\n  \"package_version\": \"1.0.0\",\n  \"display_name\": \"Real-ESRGAN x4plus\",\n  \"family\": \"rrdb\",\n  \"category\": \"photo\",\n  \"description\": \"Official Real-ESRGAN x4plus general photo restoration model\",\n  \"license\": {\n    \"spdx\": \"BSD-3-Clause\",\n    \"upstream_url\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"redistribution_review\": \"approved\"\n  },\n  \"provenance\": {\n    \"upstream_repository\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"upstream_revision\": \"v0.3.0\",\n    \"source_weight_name\": \"realesrgan-x4plus.pth\",\n    \"source_weight_sha256\": \"4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1\",\n    \"export_recipe\": \"official-onnx-export\"\n  },\n  \"variants\": [\n    {\n      \"id\": \"default\",\n      \"native_scale\": 4,\n      \"strength\": null,\n      \"artifact\": \"artifacts/model.onnx\"\n    }\n  ],\n  \"tensor\": {\n    \"input_name\": \"input\",\n    \"output_name\": \"output\",\n    \"layout\": \"NCHW\",\n    \"channels\": \"RGB\",\n    \"input_range\": [\n      0.0,\n      1.0\n    ],\n    \"output_range\": [\n      0.0,\n      1.0\n    ],\n    \"element_type\": \"float32\"\n  },\n  \"tiling\": {\n    \"alignment\": 1,\n    \"minimum\": 32,\n    \"recommended\": 256,\n    \"overlap\": 16,\n    \"window_size\": null,\n    \"static_shapes_required\": false\n  },\n  \"compatibility\": {\n    \"engine\": \"onnx-runtime\",\n    \"minimum_engine_version\": \"1.16.0\",\n    \"validated_providers\": [\n      \"cpu\"\n    ],\n    \"validated_precisions\": [\n      \"fp32\"\n    ]\n  },\n  \"artifacts\": [\n    {\n      \"path\": \"artifacts/model.onnx\",\n      \"size_bytes\": 67051644,\n      \"sha256\": \"aecc663c9d74f1c4c1a7534833dc2629091a0ae8bd5d89056ebbc0d9ffae30fb\"\n    }\n  ]\n}"
+      "manifest_template": "{\n  \"schema_version\": 1,\n  \"id\": \"realesrgan-x4plus\",\n  \"package_version\": \"1.0.0\",\n  \"display_name\": \"Real-ESRGAN x4plus\",\n  \"family\": \"rrdb\",\n  \"category\": \"photo\",\n  \"description\": \"Official Real-ESRGAN x4plus general photo restoration model\",\n  \"license\": {\n    \"spdx\": \"BSD-3-Clause\",\n    \"upstream_url\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"redistribution_review\": \"approved\"\n  },\n  \"provenance\": {\n    \"upstream_repository\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"upstream_revision\": \"v0.3.0\",\n    \"source_weight_name\": \"realesrgan-x4plus.pth\",\n    \"source_weight_sha256\": \"4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1\",\n    \"export_recipe\": \"official-onnx-export\"\n  },\n  \"variants\": [\n    {\n      \"id\": \"default\",\n      \"native_scale\": 4,\n      \"strength\": null,\n      \"artifact\": \"artifacts/model.onnx\"\n    }\n  ],\n  \"tensor\": {\n    \"input_name\": \"input\",\n    \"output_name\": \"output\",\n    \"layout\": \"NCHW\",\n    \"channels\": \"RGB\",\n    \"input_range\": [\n      0.0,\n      1.0\n    ],\n    \"output_range\": [\n      0.0,\n      1.0\n    ],\n    \"element_type\": \"float32\"\n  },\n  \"tiling\": {\n    \"alignment\": 1,\n    \"minimum\": 32,\n    \"recommended\": 256,\n    \"overlap\": 16,\n    \"window_size\": null,\n    \"static_shapes_required\": false\n  },\n  \"compatibility\": {\n    \"engine\": \"onnx-runtime\",\n    \"minimum_engine_version\": \"1.16.0\",\n    \"validated_providers\": [\n      \"cpu\"\n    ],\n    \"validated_precisions\": [\n      \"fp32\"\n    ]\n  },\n  \"artifacts\": [\n    {\n      \"path\": \"artifacts/model.onnx\",\n      \"size_bytes\": 67051643,\n      \"sha256\": \"1d276713aa9cd034c9d973580f773954ca988fb9b0e040e370564e353f1c30d2\"\n    }\n  ]\n}"
     },
     {
       "id": "realesrgan-x4plus-anime",
@@ -40,11 +40,11 @@
       "description": "Official Real-ESRGAN anime 6B compact restoration model",
       "license_spdx": "BSD-3-Clause",
       "redistribution_review": "approved",
-      "size_bytes": 17939969,
-      "sha256": "8db771cf05a8224e95438f99f5ab38eaef9b6c464dde0f6fecf6bce8a0b7fe71",
-      "manifest_sha256": "d522b1fa0c55997c5fd97cc5359d709e512c8e8e4d314286226f5112c83e2ab3",
+      "size_bytes": 17939968,
+      "sha256": "f5beb1f1ed2eda4633f5a0f714246680c68b539e666a6437078ecab69ff7d568",
+      "manifest_sha256": "c5cf56d1436d3356c9b9940217b41f0001eeb3334b0d4954f19d624f195f2fcc",
       "download_urls": [],
-      "signature": "a6f80836630089dfc27a2cb645c346568bc0028ce9f1a4a8d696d8bbb25fb1957600339ab5ce6ba1345889b4dc6b37be39359ef0881404ea61be54f7862e2a0d",
+      "signature": "424166fb75099a385bcf9c24e0abf9126d0dea0d981e5f9e29888226c1518c758fe1887c5307f3a620b2582495448c79f7227fb3d9830a7c0b2b6a77dc754d02",
       "native_scales": [
         4
       ],
@@ -58,8 +58,8 @@
           "strength": null
         }
       ],
-      "manifest_template": "{\n  \"schema_version\": 1,\n  \"id\": \"realesrgan-x4plus-anime\",\n  \"package_version\": \"1.0.0\",\n  \"display_name\": \"Real-ESRGAN x4plus Anime (6B)\",\n  \"family\": \"rrdb-6b\",\n  \"category\": \"anime\",\n  \"description\": \"Official Real-ESRGAN anime 6B compact restoration model\",\n  \"license\": {\n    \"spdx\": \"BSD-3-Clause\",\n    \"upstream_url\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"redistribution_review\": \"approved\"\n  },\n  \"provenance\": {\n    \"upstream_repository\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"upstream_revision\": \"v0.3.0\",\n    \"source_weight_name\": \"realesrgan-x4plus-anime.pth\",\n    \"source_weight_sha256\": \"f872d837d3c90ed2e05227bed711af5671a6fd1c9f7d7e91c911a61f155e99da\",\n    \"export_recipe\": \"official-onnx-export\"\n  },\n  \"variants\": [\n    {\n      \"id\": \"default\",\n      \"native_scale\": 4,\n      \"strength\": null,\n      \"artifact\": \"artifacts/model.onnx\"\n    }\n  ],\n  \"tensor\": {\n    \"input_name\": \"input\",\n    \"output_name\": \"output\",\n    \"layout\": \"NCHW\",\n    \"channels\": \"RGB\",\n    \"input_range\": [\n      0.0,\n      1.0\n    ],\n    \"output_range\": [\n      0.0,\n      1.0\n    ],\n    \"element_type\": \"float32\"\n  },\n  \"tiling\": {\n    \"alignment\": 1,\n    \"minimum\": 32,\n    \"recommended\": 256,\n    \"overlap\": 16,\n    \"window_size\": null,\n    \"static_shapes_required\": false\n  },\n  \"compatibility\": {\n    \"engine\": \"onnx-runtime\",\n    \"minimum_engine_version\": \"1.16.0\",\n    \"validated_providers\": [\n      \"cpu\"\n    ],\n    \"validated_precisions\": [\n      \"fp32\"\n    ]\n  },\n  \"artifacts\": [\n    {\n      \"path\": \"artifacts/model.onnx\",\n      \"size_bytes\": 17939969,\n      \"sha256\": \"8db771cf05a8224e95438f99f5ab38eaef9b6c464dde0f6fecf6bce8a0b7fe71\"\n    }\n  ]\n}"
+      "manifest_template": "{\n  \"schema_version\": 1,\n  \"id\": \"realesrgan-x4plus-anime\",\n  \"package_version\": \"1.0.0\",\n  \"display_name\": \"Real-ESRGAN x4plus Anime (6B)\",\n  \"family\": \"rrdb-6b\",\n  \"category\": \"anime\",\n  \"description\": \"Official Real-ESRGAN anime 6B compact restoration model\",\n  \"license\": {\n    \"spdx\": \"BSD-3-Clause\",\n    \"upstream_url\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"redistribution_review\": \"approved\"\n  },\n  \"provenance\": {\n    \"upstream_repository\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"upstream_revision\": \"v0.3.0\",\n    \"source_weight_name\": \"realesrgan-x4plus-anime.pth\",\n    \"source_weight_sha256\": \"f872d837d3c90ed2e05227bed711af5671a6fd1c9f7d7e91c911a61f155e99da\",\n    \"export_recipe\": \"official-onnx-export\"\n  },\n  \"variants\": [\n    {\n      \"id\": \"default\",\n      \"native_scale\": 4,\n      \"strength\": null,\n      \"artifact\": \"artifacts/model.onnx\"\n    }\n  ],\n  \"tensor\": {\n    \"input_name\": \"input\",\n    \"output_name\": \"output\",\n    \"layout\": \"NCHW\",\n    \"channels\": \"RGB\",\n    \"input_range\": [\n      0.0,\n      1.0\n    ],\n    \"output_range\": [\n      0.0,\n      1.0\n    ],\n    \"element_type\": \"float32\"\n  },\n  \"tiling\": {\n    \"alignment\": 1,\n    \"minimum\": 32,\n    \"recommended\": 256,\n    \"overlap\": 16,\n    \"window_size\": null,\n    \"static_shapes_required\": false\n  },\n  \"compatibility\": {\n    \"engine\": \"onnx-runtime\",\n    \"minimum_engine_version\": \"1.16.0\",\n    \"validated_providers\": [\n      \"cpu\"\n    ],\n    \"validated_precisions\": [\n      \"fp32\"\n    ]\n  },\n  \"artifacts\": [\n    {\n      \"path\": \"artifacts/model.onnx\",\n      \"size_bytes\": 17939968,\n      \"sha256\": \"f5beb1f1ed2eda4633f5a0f714246680c68b539e666a6437078ecab69ff7d568\"\n    }\n  ]\n}"
     }
   ],
-  "signature": "425ae6ba9c528f2f27ac75490e9ce58e4ecc8a5c9bbce564ab9e912f703e1a37ca7338d8871fb4ea45baa177b935024c053d54953671af26053df450000cee0e"
+  "signature": "b6b72a500889174a52345c77fa98a6e1debb3dc4007181f74f91604582b86883d620351330f4883bd73b1eea6e324e26a878bcd4fdaba49ecbbbe35ead221503"
 }

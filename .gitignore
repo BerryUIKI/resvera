@@ -3,6 +3,8 @@
 
 # Python
 .venv/
+# Scratch environments used to reproduce the export/parity toolchain.
+.venv-*/
 __pycache__/
 *.pyc
 
