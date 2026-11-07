@@ -60,3 +60,49 @@ the downloader hashes that string verbatim.
 `cargo test -p resvera-models --test production_catalog_contract_test` verifies the
 committed catalog against the pinned root without needing the seed. That test is
 the gate; this tool is only for producing signatures.
+
+## Publishing model artifacts
+
+Publishing is the one step that cannot be reproduced offline: it rewrites
+`download_urls`, which invalidates every signature and needs the production key.
+`tools/release/publish_model_artifacts.py` automates it and refuses to run
+without a real key.
+
+```bash
+# 1. Build the signer
+cargo build --release --manifest-path tools/catalog-sign/Cargo.toml
+
+# 2. Validate artifacts and the key without touching anything
+python tools/release/publish_model_artifacts.py \
+  --tag models-v1 \
+  --artifacts-dir artifacts/exports \
+  --signing-key-file /secure/catalog-seed.hex \
+  --dry-run
+
+# 3. Publish, verify the uploaded bytes, and re-sign the catalog
+python tools/release/publish_model_artifacts.py \
+  --tag models-v1 \
+  --artifacts-dir artifacts/exports \
+  --signing-key-file /secure/catalog-seed.hex
+
+# 4. Confirm the catalog still verifies
+cargo test -p resvera-models --test production_catalog_contract_test
+```
+
+The tool enforces these properties, in order:
+
+1. The signing key must be 64 hex characters, so a scratch key cannot silently
+   produce a catalog no shipped build accepts.
+2. Every artifact's SHA-256 and size must match the catalog before upload.
+3. Assets are uploaded, then re-downloaded and hashed. A mismatch aborts before
+   the catalog is modified.
+4. Only then are `download_urls` written, the catalog signed, and the signature
+   verified.
+
+A partial run therefore never leaves a catalog pointing at unpublished bytes.
+
+## Release gate
+
+Do not run the publish step until the production signing key exists. The key
+rotated in `#90` was generated during remediation and must be replaced before any
+artifact is published; see the "Key custody" section above.
