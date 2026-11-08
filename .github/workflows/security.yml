@@ -37,9 +37,15 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Audit Cargo Dependencies
-        uses: rustsec/audit-check@v1.4.1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        # `rustsec/audit-check` reports by opening an issue, which needs
+        # `issues: write`. This workflow deliberately holds no write
+        # permissions, so the action failed on every push with
+        # "Resource not accessible by integration" while passing on PRs, where
+        # it takes a different reporting path. Running cargo audit directly
+        # makes the exit status the signal and keeps the job read-only.
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
 
   pnpm-audit:
     name: Frontend pnpm Audit
