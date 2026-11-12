@@ -11,7 +11,7 @@ This document defines the exact, reproducible toolchain versions required to bui
 | **Rust Toolchain** | `1.97.1` | `rust-toolchain.toml` | `dtolnay/rust-toolchain` via `rust-toolchain.toml` |
 | **Node.js** | `22.15.0` | `.node-version`, `package.json#engines` | `actions/setup-node@v4` with `node-version-file: .node-version` |
 | **pnpm** | `11.18.0` | `package.json#packageManager` | `pnpm/action-setup@v4` with `version: 11.18.0` |
-| **Python** | `3.12.7` | `.python-version` | `actions/setup-python@v5` with `python-version-file: .python-version` |
+| **Python** | `3.12.7` | `.python-version` | `actions/setup-python@v5` with `python-version-file: .python-version`, on the pinned `ubuntu-24.04` runner |
 | **Model Export Toolchain** | Exact pins | `tools/export/requirements.txt`, `requirements-lock.txt` | `pip install -r tools/export/requirements.txt` |
 
 ---
