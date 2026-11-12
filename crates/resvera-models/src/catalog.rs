@@ -3,12 +3,13 @@ use serde::{Deserialize, Serialize};
 
 /// Pinned Ed25519 public key (trust root) for official Resvera model catalog and package signing.
 ///
-/// Rotated on 2026-11-01 because the previous seed was committed in plaintext in
-/// the test suite. The production signing seed is held out-of-tree; see
-/// `tools/catalog-sign/README.md` for the rotation and signing procedure.
+/// Rotated on 2026-11-13 to the key that signs the published model packages.
+/// The previous root (rotated 2026-11-01 after a plaintext seed was found in the
+/// test suite) never signed a published artifact. The signing seed is held
+/// out-of-tree; see `tools/catalog-sign/README.md` for the procedure.
 pub const RESVERA_PRODUCTION_TRUST_ROOT: [u8; 32] = [
-    248, 210, 130, 19, 134, 62, 145, 99, 81, 82, 79, 53, 12, 100, 11, 235, 15, 29, 40, 226, 37,
-    112, 50, 170, 226, 157, 60, 68, 226, 190, 133, 191,
+    36, 129, 153, 143, 175, 52, 21, 27, 15, 113, 230, 35, 84, 169, 6, 126, 114, 34, 11, 137, 92,
+    241, 15, 97, 54, 201, 199, 246, 37, 226, 147, 110,
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
