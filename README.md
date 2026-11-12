@@ -15,10 +15,10 @@ Resvera is an open-source desktop image upscaler and restoration application bui
 
 - ⚡ **Pure Offline AI Super-Resolution**: 100% local image upscaling with zero network dependencies during processing.
 - 🎯 **Supported Models**:
-  - **Real-ESRGAN x4plus** (RRDB, Photography) — *Export and CPU parity validated; no public package is published yet*
-  - **Real-ESRGAN x4plus Anime** (RRDB-6B, Anime / Illustrations) — *Export and CPU parity validated; no public package is published yet*
+  - **Real-ESRGAN x4plus** (RRDB, Photography) — *Export and CPU parity validated; package published and installable from the Model Center*
+  - **Real-ESRGAN x4plus Anime** (RRDB-6B, Anime / Illustrations) — *Export and CPU parity validated; package published and installable from the Model Center*
   - **Real-CUGAN 2x / 4x** & **Real-HAT-GAN 4x** — *Core adapters implemented in library; not present in the signed catalog until a validated package exists*
-  - Packages are installed by importing a signed ONNX model package in the Model Center. The catalog currently publishes no download URLs, so the Model Center does not offer a download that would fail.
+  - Packages download from signed release assets (`models-v1`) and are verified by SHA-256 and Ed25519 before activation. Local import of a signed package remains available for offline installs.
 - 🚀 **Hardware Acceleration & Execution Providers**:
   - **CPU (SIMD)**: 100% verified cross-platform baseline across Windows, macOS, and Linux.
   - **DirectML / CoreML / CUDA / OpenVINO**: Architecturally integrated, but fail-closed and disabled in production pending physical hardware test evidence ([#68](https://github.com/BerryUIKI/resvera/issues/68)).
@@ -54,7 +54,7 @@ Resvera is an open-source desktop image upscaler and restoration application bui
 | **CUGAN / HAT Adapters** | ✅ Implemented | ⏳ Not in catalog | Excluded from the signed catalog until a validated package exists |
 | **Metadata / ICC Preservation** | ✅ Implemented | ✅ Shipped | Fully verified (JPEG/PNG) ([#52](https://github.com/BerryUIKI/resvera/issues/52)) |
 | **Persistent Queue & Recovery** | ✅ Implemented | ✅ Shipped | SQLite crash-consistent queue |
-| **Model Center Crypto & Staging** | ✅ Implemented | ⏳ No published packages | Local import and signature verification work; no artifact is published for download yet |
+| **Model Center Crypto & Staging** | ✅ Implemented | ✅ Shipped | Packages download from signed release assets and verify SHA-256 + Ed25519 before activation |
 | **8x Multi-pass Cascading** | ✅ Implemented | ✅ Shipped | Two passes at the model's native scale, downsampled to 8x. Limited to small inputs by the blend-buffer budget |
 | **Release Signing & Auto-Updater** | ⏳ In Progress | ⏳ In Progress | Tracked by [#58](https://github.com/BerryUIKI/resvera/issues/58) |
 
