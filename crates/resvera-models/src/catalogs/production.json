@@ -15,7 +15,7 @@
       "sha256": "1d276713aa9cd034c9d973580f773954ca988fb9b0e040e370564e353f1c30d2",
       "manifest_sha256": "66a8f9016139de4678712cdbca49342eba84c83982dc331bcb116d97b70f18bb",
       "download_urls": [],
-      "signature": "7a80d36591da26dd712f600d9bf9a0f210b4648ac9f712e56cb1bd441f866a307631bd4eb751e6d6b05df14c07c95d40ffade56abf045165b6ff94bebbe69609",
+      "signature": "4f922c31437fc951950136c2e57301dae5a87bd378241792559606f55095a1be06d9b06ce4b97357e2c3c4c0a7266749285c96f826f1f620e8803730c11a9805",
       "native_scales": [
         4
       ],
@@ -44,7 +44,7 @@
       "sha256": "f5beb1f1ed2eda4633f5a0f714246680c68b539e666a6437078ecab69ff7d568",
       "manifest_sha256": "90624c5b2f1d5c1944d67fbdb5691591dc40af4d0ef2236fff402c7d05932d49",
       "download_urls": [],
-      "signature": "cd43b066996db38983375f07554e1b998c57658a2286a6a06b4647040744c2d9ecdccca980faf60a5a19a0f1880a0228aa463ba41dfcc383953f152ec55ac103",
+      "signature": "4273a9955cea23be025b1dd18bacf5cd8f564d8878d307e7414f789d78ab42fc17decef707f1464a24b0585fe457f689ae277d33c49cf6757658c796ef70de0d",
       "native_scales": [
         4
       ],
@@ -61,5 +61,5 @@
       "manifest_template": "{\n  \"schema_version\": 1,\n  \"id\": \"realesrgan-x4plus-anime\",\n  \"package_version\": \"1.0.0\",\n  \"display_name\": \"Real-ESRGAN x4plus Anime (6B)\",\n  \"family\": \"rrdb-6b\",\n  \"category\": \"anime\",\n  \"description\": \"Official Real-ESRGAN anime 6B compact restoration model\",\n  \"license\": {\n    \"spdx\": \"BSD-3-Clause\",\n    \"upstream_url\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"redistribution_review\": \"approved\"\n  },\n  \"provenance\": {\n    \"upstream_repository\": \"https://github.com/xinntao/Real-ESRGAN\",\n    \"upstream_revision\": \"v0.3.0\",\n    \"source_weight_name\": \"RealESRGAN_x4plus_anime_6B.pth\",\n    \"source_weight_sha256\": \"f872d837d3c90ed2e05227bed711af5671a6fd1c9f7d7e91c911a61f155e99da\",\n    \"export_recipe\": \"official-onnx-export\"\n  },\n  \"variants\": [\n    {\n      \"id\": \"default\",\n      \"native_scale\": 4,\n      \"strength\": null,\n      \"artifact\": \"artifacts/model.onnx\"\n    }\n  ],\n  \"tensor\": {\n    \"input_name\": \"input\",\n    \"output_name\": \"output\",\n    \"layout\": \"NCHW\",\n    \"channels\": \"RGB\",\n    \"input_range\": [\n      0.0,\n      1.0\n    ],\n    \"output_range\": [\n      0.0,\n      1.0\n    ],\n    \"element_type\": \"float32\"\n  },\n  \"tiling\": {\n    \"alignment\": 1,\n    \"minimum\": 32,\n    \"recommended\": 256,\n    \"overlap\": 16,\n    \"window_size\": null,\n    \"static_shapes_required\": false\n  },\n  \"compatibility\": {\n    \"engine\": \"onnx-runtime\",\n    \"minimum_engine_version\": \"1.16.0\",\n    \"validated_providers\": [\n      \"cpu\"\n    ],\n    \"validated_precisions\": [\n      \"fp32\"\n    ]\n  },\n  \"artifacts\": [\n    {\n      \"path\": \"artifacts/model.onnx\",\n      \"size_bytes\": 17939968,\n      \"sha256\": \"f5beb1f1ed2eda4633f5a0f714246680c68b539e666a6437078ecab69ff7d568\"\n    }\n  ]\n}"
     }
   ],
-  "signature": "854e88432d9b7b3b21bd7ba1acef5e31cf8cc820c2f0fc48dbc139bb56a1c279b99b6c2e8bfdc690ceacc112655a22512bd8e063fb300bf497140096f2def901"
+  "signature": "0613adf132ddaf3c6a1a4454071f5a90234873fda489106fb54116bda46092f9b6d9a7dd080f575fd302eec3580d848f0949ff8de71143f085eb0c9a1842f203"
 }
