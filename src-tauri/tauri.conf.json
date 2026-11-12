@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Resvera",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.resvera.desktop",
   "build": {
     "beforeDevCommand": "pnpm run dev",
@@ -44,7 +44,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc3QzM3OUE1Q0QwMjE4NkQKUldSdEdBTE5wWG5EZCtJcm1mdHFmV2FTdzNKN1JqT0NNazdmM015K0JHRGlCYzE1anJnRnRXVEgK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEyMjdBQzgyMDU4MEU2NzgKUldSNDVvQUZncXdub3YweW9rcmhjaTZBYllhdFNGcjZYYml2bHd3cC9KUTB2aHF2ZERsUE5JTkoK",
       "endpoints": [
         "https://github.com/BerryUIKI/resvera/releases/latest/download/latest.json"
       ]
