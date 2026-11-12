@@ -203,6 +203,12 @@ jobs:
       - name: Install cargo-cyclonedx
         run: cargo install cargo-cyclonedx --locked
 
+      - name: Install frontend dependencies
+        # @cyclonedx/cyclonedx-npm reads node_modules and the pnpm lockfile as
+        # its evidence. Without this install it fails with "missing evidence"
+        # — the job set pnpm up but never ran an install.
+        run: pnpm install --frozen-lockfile
+
       - name: Generate Rust CycloneDX SBOM
         run: |
           set -euo pipefail
@@ -226,8 +232,18 @@ jobs:
       - name: Generate Node CycloneDX SBOM
         run: |
           set -euo pipefail
-          pnpm dlx @cyclonedx/cyclonedx-npm --output-file sbom-artifacts/sbom-node.cdx.json
-          ls -la sbom-artifacts/sbom-node.cdx.json
+          # `@cyclonedx/cyclonedx-npm` (documented in RELEASE_SECURITY.md since
+          # #89, never actually run to completion) reads npm's package-lock.json,
+          # which this project does not have — it uses pnpm. It fails with
+          # "missing evidence" on every run. pnpm 11 has a native SBOM command
+          # that reads the pnpm lockfile directly, so use that instead.
+          pnpm sbom --sbom-format cyclonedx --sbom-type application > sbom-artifacts/sbom-node.cdx.json
+          python3 -c "
+          import json
+          d = json.load(open('sbom-artifacts/sbom-node.cdx.json'))
+          assert d.get('bomFormat') == 'CycloneDX', 'not a CycloneDX document'
+          print('node SBOM:', len(d.get('components', [])), 'components')
+          "
 
       - name: Upload SBOM Artifacts
         uses: actions/upload-artifact@v4
