@@ -111,3 +111,26 @@ Automated CI and test suites enforce that:
 - No toolchain file specifies unpinned ranges (`stable`, `latest`, `>=`, `^`, `~`).
 - Model export is deterministic: running export twice with the same inputs produces identical SHA-256 hashes.
 - Build artifacts are reproducible across clean builds on the same platform.
+- Every digest pinned in `production.json` is backed by committed evidence and complete provenance (`tools/export/verify_catalog_reproducibility.py`, offline, runs in CI).
+
+### 4.1 Verifying the catalog digests end to end
+
+The offline CI check confirms that the catalog is internally consistent and traceable. It
+does not re-run the export, because that needs network access, roughly 85 MB of upstream
+checkpoints, and several minutes of CPU on every CI run.
+
+To reproduce the pinned digests from source:
+
+```bash
+python tools/export/verify_catalog_reproducibility.py --export
+```
+
+This downloads each upstream checkpoint named in the catalog provenance, verifies its
+SHA-256, re-exports with the pinned toolchain, and asserts the output is byte-identical to
+the catalog digest. Run it after any change to `requirements.txt`, and before publishing
+model artifacts.
+
+If a re-export differs, do **not** loosen the check. A difference means either the toolchain
+pins moved or the pinned digest was produced by a different toolchain; both need to be
+resolved explicitly, with the resulting hash re-pinned and the evidence regenerated.
+

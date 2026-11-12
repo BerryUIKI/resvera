@@ -55,6 +55,13 @@ jobs:
       - name: Export & Parity Toolchain Tests
         run: python3 -m unittest discover -s tools/export
 
+      - name: Catalog Digest Reproducibility
+        # Offline only: confirms every pinned digest is backed by committed
+        # evidence and that provenance/toolchain records are complete. The full
+        # re-export (network + 85 MB of checkpoints) is a documented manual step:
+        #   python tools/export/verify_catalog_reproducibility.py --export
+        run: python3 tools/export/verify_catalog_reproducibility.py
+
       - name: Release Verification Tool Tests
         run: python3 -m unittest discover -s tools/release
 
