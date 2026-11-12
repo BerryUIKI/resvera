@@ -22,7 +22,7 @@ sha2 = "0.10"
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 rand = "0.8"
 uuid = { version = "1.10", features = ["v4", "serde"] }
-rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
+rusqlite = { version = "0.42", features = ["bundled", "chrono"] }
 chrono = { version = "0.4", features = ["serde"] }
 tempfile = "3.12"
 tracing = "0.1"

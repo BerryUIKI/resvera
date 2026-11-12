@@ -133,4 +133,3 @@ model artifacts.
 If a re-export differs, do **not** loosen the check. A difference means either the toolchain
 pins moved or the pinned digest was produced by a different toolchain; both need to be
 resolved explicitly, with the resulting hash re-pinned and the evidence regenerated.
-
