@@ -3317,7 +3317,7 @@ dependencies = [
 
 [[package]]
 name = "resvera-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "fast_image_resize",
@@ -3337,7 +3337,7 @@ dependencies = [
 
 [[package]]
 name = "resvera-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -3362,7 +3362,7 @@ dependencies = [
 
 [[package]]
 name = "resvera-engine-ort"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "image",
  "ort",
@@ -3377,7 +3377,7 @@ dependencies = [
 
 [[package]]
 name = "resvera-models"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "ed25519-dalek",
@@ -3393,7 +3393,7 @@ dependencies = [
 
 [[package]]
 name = "resvera-persistence"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",

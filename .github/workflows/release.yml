@@ -108,28 +108,55 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
+          # src-tauri is a member of the root Cargo workspace, so bundles are
+          # written to the workspace-level target directory, not src-tauri/target.
           New-Item -ItemType Directory -Force -Path dist-artifacts
-          Copy-Item -Path "src-tauri/target/release/bundle/nsis/*.exe" -Destination "dist-artifacts/" -ErrorAction SilentlyContinue
-          Copy-Item -Path "src-tauri/target/release/bundle/msi/*.msi" -Destination "dist-artifacts/" -ErrorAction SilentlyContinue
-          Copy-Item -Path "src-tauri/target/release/bundle/nsis/*.zip" -Destination "dist-artifacts/" -ErrorAction SilentlyContinue
-          Copy-Item -Path "src-tauri/target/release/bundle/nsis/*.sig" -Destination "dist-artifacts/" -ErrorAction SilentlyContinue
+          $bundle = "target/release/bundle"
+          Copy-Item -Path "$bundle/nsis/*.exe" -Destination "dist-artifacts/" -ErrorAction SilentlyContinue
+          Copy-Item -Path "$bundle/msi/*.msi" -Destination "dist-artifacts/" -ErrorAction SilentlyContinue
+          Copy-Item -Path "$bundle/nsis/*.zip" -Destination "dist-artifacts/" -ErrorAction SilentlyContinue
+          Copy-Item -Path "$bundle/nsis/*.sig" -Destination "dist-artifacts/" -ErrorAction SilentlyContinue
+          # An empty artifact set must fail here, not surface later as a confusing
+          # updater-manifest error.
+          $count = (Get-ChildItem -Path dist-artifacts -File | Measure-Object).Count
+          if ($count -eq 0) {
+            Write-Error "No artifacts collected from $bundle; the bundle step produced nothing."
+            exit 1
+          }
+          Get-ChildItem -Path dist-artifacts | Select-Object Name, Length
 
       - name: Collect Platform Artifacts (macOS)
         if: matrix.os == 'macos-latest'
         run: |
+          set -euo pipefail
+          # Workspace-level target directory; see the Windows step above.
+          bundle=target/release/bundle
           mkdir -p dist-artifacts
-          cp -f src-tauri/target/release/bundle/dmg/*.dmg dist-artifacts/ || true
-          cp -f src-tauri/target/release/bundle/macos/*.tar.gz dist-artifacts/ || true
-          cp -f src-tauri/target/release/bundle/macos/*.sig dist-artifacts/ || true
+          cp -f "$bundle"/dmg/*.dmg dist-artifacts/ 2>/dev/null || true
+          cp -f "$bundle"/macos/*.tar.gz dist-artifacts/ 2>/dev/null || true
+          cp -f "$bundle"/macos/*.sig dist-artifacts/ 2>/dev/null || true
+          if [ -z "$(ls -A dist-artifacts)" ]; then
+            echo "::error::No artifacts collected from $bundle; the bundle step produced nothing."
+            exit 1
+          fi
+          ls -la dist-artifacts
 
       - name: Collect Platform Artifacts (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
+          set -euo pipefail
+          # Workspace-level target directory; see the Windows step above.
+          bundle=target/release/bundle
           mkdir -p dist-artifacts
-          cp -f src-tauri/target/release/bundle/appimage/*.AppImage dist-artifacts/ || true
-          cp -f src-tauri/target/release/bundle/appimage/*.tar.gz dist-artifacts/ || true
-          cp -f src-tauri/target/release/bundle/appimage/*.sig dist-artifacts/ || true
-          cp -f src-tauri/target/release/bundle/deb/*.deb dist-artifacts/ || true
+          cp -f "$bundle"/appimage/*.AppImage dist-artifacts/ 2>/dev/null || true
+          cp -f "$bundle"/appimage/*.tar.gz dist-artifacts/ 2>/dev/null || true
+          cp -f "$bundle"/appimage/*.sig dist-artifacts/ 2>/dev/null || true
+          cp -f "$bundle"/deb/*.deb dist-artifacts/ 2>/dev/null || true
+          if [ -z "$(ls -A dist-artifacts)" ]; then
+            echo "::error::No artifacts collected from $bundle; the bundle step produced nothing."
+            exit 1
+          fi
+          ls -la dist-artifacts
 
       - name: Upload Platform Artifacts
         uses: actions/upload-artifact@v4
