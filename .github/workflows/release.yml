@@ -31,12 +31,19 @@ jobs:
           - platform: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
+            rust_targets: x86_64-pc-windows-msvc
           - platform: darwin-universal
             os: macos-latest
+            # Tauri's bundle target is `universal-apple-darwin`, but rustup has no
+            # such Rust target: a universal binary is built from both arches and
+            # combined with lipo. `tauri build --target universal-apple-darwin`
+            # needs both std targets installed, so install them here.
             target: universal-apple-darwin
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
           - platform: linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            rust_targets: x86_64-unknown-linux-gnu
 
     steps:
       - name: Checkout repository
@@ -46,7 +53,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.97.1"
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.rust_targets }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -102,7 +109,10 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: pnpm exec tauri build
+        # --target is required: without it Tauri builds only the host default
+        # architecture, so the macOS job would produce a single-arch bundle
+        # instead of a universal one.
+        run: pnpm exec tauri build --target ${{ matrix.target }}
 
       - name: Collect Platform Artifacts (Windows)
         if: matrix.os == 'windows-latest'
@@ -110,8 +120,10 @@ jobs:
         run: |
           # src-tauri is a member of the root Cargo workspace, so bundles are
           # written to the workspace-level target directory, not src-tauri/target.
+          # With --target, Cargo nests the output under target/<triple>/release.
           New-Item -ItemType Directory -Force -Path dist-artifacts
-          $bundle = "target/release/bundle"
+          $bundle = "target/${{ matrix.target }}/release/bundle"
+          if (-not (Test-Path $bundle)) { $bundle = "target/release/bundle" }
           Copy-Item -Path "$bundle/nsis/*.exe" -Destination "dist-artifacts/" -ErrorAction SilentlyContinue
           Copy-Item -Path "$bundle/msi/*.msi" -Destination "dist-artifacts/" -ErrorAction SilentlyContinue
           Copy-Item -Path "$bundle/nsis/*.zip" -Destination "dist-artifacts/" -ErrorAction SilentlyContinue
@@ -130,7 +142,8 @@ jobs:
         run: |
           set -euo pipefail
           # Workspace-level target directory; see the Windows step above.
-          bundle=target/release/bundle
+          bundle="target/${{ matrix.target }}/release/bundle"
+          [ -d "$bundle" ] || bundle=target/release/bundle
           mkdir -p dist-artifacts
           cp -f "$bundle"/dmg/*.dmg dist-artifacts/ 2>/dev/null || true
           cp -f "$bundle"/macos/*.tar.gz dist-artifacts/ 2>/dev/null || true
@@ -146,7 +159,8 @@ jobs:
         run: |
           set -euo pipefail
           # Workspace-level target directory; see the Windows step above.
-          bundle=target/release/bundle
+          bundle="target/${{ matrix.target }}/release/bundle"
+          [ -d "$bundle" ] || bundle=target/release/bundle
           mkdir -p dist-artifacts
           cp -f "$bundle"/appimage/*.AppImage dist-artifacts/ 2>/dev/null || true
           cp -f "$bundle"/appimage/*.tar.gz dist-artifacts/ 2>/dev/null || true
@@ -191,14 +205,29 @@ jobs:
 
       - name: Generate Rust CycloneDX SBOM
         run: |
+          set -euo pipefail
           mkdir -p sbom-artifacts
-          cargo cyclonedx --all --output-format json
-          find . -name "*.cdx.json" -exec cp {} sbom-artifacts/ \;
-          cp sbom-artifacts/resvera-desktop.cdx.json sbom-artifacts/sbom-rust.cdx.json || true
+          # `cargo cyclonedx` operates on the whole workspace and writes one
+          # .cdx.json per crate. The previous invocation used
+          # `--all --output-format json`, which this CLI does not accept; the
+          # flag is `--format`.
+          cargo cyclonedx --format json --spec-version 1.5
+          while IFS= read -r bom; do
+            cp "$bom" sbom-artifacts/
+          done < <(find crates src-tauri -name "*.cdx.json" -type f)
+          # Keep a stable top-level name for the desktop crate.
+          cp sbom-artifacts/resvera-desktop.cdx.json sbom-artifacts/sbom-rust.cdx.json
+          if [ -z "$(ls -A sbom-artifacts)" ]; then
+            echo "::error::No Rust SBOM files were produced."
+            exit 1
+          fi
+          ls -la sbom-artifacts
 
       - name: Generate Node CycloneDX SBOM
         run: |
+          set -euo pipefail
           pnpm dlx @cyclonedx/cyclonedx-npm --output-file sbom-artifacts/sbom-node.cdx.json
+          ls -la sbom-artifacts/sbom-node.cdx.json
 
       - name: Upload SBOM Artifacts
         uses: actions/upload-artifact@v4
