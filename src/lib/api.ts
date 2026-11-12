@@ -99,7 +99,7 @@ const BROWSER_CATALOG: ModelSummary[] = [
     redistributionReview: "approved",
     validatedProviders: ["cpu"],
     variants: [{ id: "default", nativeScale: 4, strength: null }],
-    installable: false,
+    installable: true,
   },
   {
     id: "realesrgan-x4plus-anime",
@@ -115,7 +115,7 @@ const BROWSER_CATALOG: ModelSummary[] = [
     redistributionReview: "approved",
     validatedProviders: ["cpu"],
     variants: [{ id: "default", nativeScale: 4, strength: null }],
-    installable: false,
+    installable: true,
   },
 ];
 
