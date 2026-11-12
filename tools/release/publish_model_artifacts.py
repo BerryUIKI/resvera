@@ -30,6 +30,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -37,6 +38,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CATALOG_PATH = REPO_ROOT / "crates" / "resvera-models" / "src" / "catalogs" / "production.json"
+TRUST_ROOT_SOURCE = REPO_ROOT / "crates" / "resvera-models" / "src" / "catalog.rs"
 SIGNER_BASE = REPO_ROOT / "tools" / "catalog-sign" / "target" / "release" / "resvera-catalog-sign"
 SIGNER = SIGNER_BASE.with_suffix(".exe") if os.name == "nt" else SIGNER_BASE
 REPO_SLUG = "BerryUIKI/resvera"
@@ -77,6 +79,67 @@ def assert_no_placeholder_key(signing_key_file: Path) -> None:
     if len(seed) != 64 or not all(c in "0123456789abcdefABCDEF" for c in seed):
         raise SystemExit("error: signing key must be 64 hex characters (32 bytes)")
     print("signing key: present (64 hex chars)")
+
+
+def pinned_trust_root() -> bytes:
+    """
+    Reads RESVERA_PRODUCTION_TRUST_ROOT out of the source of truth.
+
+    Parsed from Rust source rather than duplicated here so the two cannot drift.
+    """
+    source = TRUST_ROOT_SOURCE.read_text(encoding="utf-8")
+    match = re.search(
+        r"RESVERA_PRODUCTION_TRUST_ROOT:\s*\[u8;\s*32\]\s*=\s*\[([^\]]+)\]",
+        source,
+        re.S,
+    )
+    if not match:
+        raise SystemExit(f"error: could not locate the trust root in {TRUST_ROOT_SOURCE}")
+    try:
+        values = [int(part.strip()) for part in match.group(1).split(",") if part.strip()]
+    except ValueError as exc:
+        raise SystemExit(f"error: trust root in source is not a byte array: {exc}")
+    if len(values) != 32 or any(not 0 <= v <= 255 for v in values):
+        raise SystemExit("error: trust root in source is not 32 valid bytes")
+    return bytes(values)
+
+
+def assert_key_matches_trust_root(signing_key_file: Path) -> None:
+    """
+    The signing key must correspond to the pinned trust root.
+
+    `resvera-catalog-sign verify` only proves a catalog is self-consistent: it
+    checks the signature against the same seed that produced it. A publishing
+    run with the wrong key would therefore report success while emitting a
+    catalog that every shipped build rejects at `load_production_catalog`. This
+    closes that gap.
+    """
+    expected = pinned_trust_root()
+    result = run([str(SIGNER), "pubkey", "--key-file", str(signing_key_file)])
+    actual_hex = result.stdout.strip()
+    try:
+        actual = bytes.fromhex(actual_hex)
+    except ValueError:
+        raise SystemExit(f"error: signer returned an unreadable public key: {actual_hex!r}")
+    if actual != expected:
+        raise SystemExit(
+            "error: signing key does not match RESVERA_PRODUCTION_TRUST_ROOT\n"
+            f"  key derives to: {actual.hex()}\n"
+            f"  pinned root:    {expected.hex()}\n"
+            "  Publishing with this key would produce a catalog every shipped build rejects.\n"
+            "  Either use the key that owns the pinned root, or rotate the root first."
+        )
+    print(f"signing key matches pinned trust root ({actual.hex()[:16]}...)")
+
+
+def verify_catalog_against_root(catalog_path: Path, signing_key_file: Path) -> None:
+    """
+    Final gate: the re-signed catalog must verify under the pinned root, exactly
+    as `load_production_catalog` does at runtime.
+    """
+    expected_hex = pinned_trust_root().hex()
+    run([str(SIGNER), "verify", "--catalog", str(catalog_path), "--pubkey", expected_hex])
+    print("catalog verifies against the pinned trust root")
 
 
 def verify_artifact(entry: dict, artifact_path: Path) -> None:
@@ -153,8 +216,10 @@ def resign_and_verify(catalog: dict, signing_key_file: Path) -> None:
 
     run([str(SIGNER), "sign", "--catalog", str(CATALOG_PATH),
          "--key-file", str(signing_key_file)])
-    run([str(SIGNER), "verify", "--catalog", str(CATALOG_PATH),
-         "--key-file", str(signing_key_file)])
+    # Verify against the PINNED ROOT, not against the signing key. Verifying with
+    # the same seed only proves self-consistency and would pass for a key that no
+    # shipped build trusts.
+    verify_catalog_against_root(CATALOG_PATH, signing_key_file)
 
 
 def main() -> int:
@@ -175,6 +240,7 @@ def main() -> int:
         )
 
     assert_no_placeholder_key(args.signing_key_file)
+    assert_key_matches_trust_root(args.signing_key_file)
     catalog = load_catalog()
 
     by_id = {entry["id"]: entry for entry in catalog["models"]}

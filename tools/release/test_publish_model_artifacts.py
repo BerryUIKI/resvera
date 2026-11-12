@@ -12,12 +12,15 @@ import json
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
+import tools.release.publish_model_artifacts as verify
 from tools.release.publish_model_artifacts import (
     ARTIFACTS,
     CATALOG_PATH,
     assert_no_placeholder_key,
+    pinned_trust_root,
     sha256_file,
     verify_artifact,
 )
@@ -136,3 +139,39 @@ class TestCatalogWiring(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTrustRootGuard(unittest.TestCase):
+    """
+    `resvera-catalog-sign verify --key-file` only proves self-consistency: it
+    checks a signature against the same seed that made it. A publish run with
+    the wrong key would therefore succeed while emitting a catalog every shipped
+    build rejects. These tests pin the guard that closes that gap.
+    """
+
+    def test_pinned_root_is_32_bytes(self):
+        root = pinned_trust_root()
+        self.assertEqual(len(root), 32)
+        self.assertNotEqual(root, b"\x00" * 32)
+
+    def test_pinned_root_reads_the_rust_source(self):
+        # Guards the parser: if the constant is reformatted, this fails loudly
+        # rather than returning garbage that would compare equal to nothing.
+        source = verify.TRUST_ROOT_SOURCE
+        self.assertTrue(source.is_file(), f"missing {source}")
+        text = source.read_text(encoding="utf-8")
+        self.assertIn("RESVERA_PRODUCTION_TRUST_ROOT", text)
+        self.assertEqual(len(pinned_trust_root()), 32)
+
+    def test_rejects_unparseable_trust_root(self):
+        original = verify.TRUST_ROOT_SOURCE
+        with tempfile.NamedTemporaryFile("w", suffix=".rs", delete=False) as handle:
+            handle.write("// no trust root here\n")
+            path = Path(handle.name)
+        try:
+            with mock.patch.object(verify, "TRUST_ROOT_SOURCE", path):
+                with self.assertRaises(SystemExit) as ctx:
+                    pinned_trust_root()
+                self.assertIn("could not locate", str(ctx.exception))
+        finally:
+            path.unlink(missing_ok=True)
