@@ -281,8 +281,12 @@ jobs:
           ls -la dist/
 
       - name: Generate SHA256 Checksums
+        # Generation only: latest.json does not exist yet at this point (it is
+        # assembled in the next step), so the full verification gate — which
+        # requires the updater manifest — cannot run here by construction. The
+        # gate runs after assembly below.
         run: |
-          python3 tools/release/verify_release_artifacts.py --dist-dir dist --generate-checksums
+          python3 tools/release/verify_release_artifacts.py --dist-dir dist --generate-checksums --generate-only
 
       - name: Assemble Tauri latest.json Updater Manifest
         env:

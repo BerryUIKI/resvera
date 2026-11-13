@@ -234,6 +234,17 @@ def main() -> int:
         help="Generate SHA256SUMS.txt for artifacts before verification",
     )
     parser.add_argument(
+        "--generate-only",
+        action="store_true",
+        help=(
+            "Generate SHA256SUMS.txt and exit without verifying. For the release "
+            "pipeline, where checksums are produced BEFORE latest.json is assembled: "
+            "running the full gate at that point would fail on the missing updater "
+            "manifest by construction. The gate runs again later, after assembly, with "
+            "everything in place."
+        ),
+    )
+    parser.add_argument(
         "--require-sbom",
         action="store_true",
         default=True,
@@ -255,6 +266,10 @@ def main() -> int:
     if args.generate_checksums:
         print(f"Generating SHA256SUMS.txt in {args.dist_dir}...")
         generate_sha256sums(args.dist_dir)
+
+    if args.generate_only:
+        print("Checksums generated; skipping verification (generation-only mode).")
+        return 0
 
     success, errors = verify_all_release_artifacts(
         args.dist_dir,
