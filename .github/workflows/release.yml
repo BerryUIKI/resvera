@@ -32,14 +32,15 @@ jobs:
             os: windows-latest
             target: x86_64-pc-windows-msvc
             rust_targets: x86_64-pc-windows-msvc
-          - platform: darwin-universal
+          - platform: darwin-aarch64
             os: macos-latest
-            # Tauri's bundle target is `universal-apple-darwin`, but rustup has no
-            # such Rust target: a universal binary is built from both arches and
-            # combined with lipo. `tauri build --target universal-apple-darwin`
-            # needs both std targets installed, so install them here.
-            target: universal-apple-darwin
-            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            # Apple Silicon only. The x86_64 half of a universal build is not
+            # possible with the pinned ort-sys: ONNX Runtime ships no prebuilt
+            # binaries for x86_64-apple-darwin, and building it from source is
+            # out of scope. Intel Macs cannot install this release; recorded as
+            # a known limitation in the release notes.
+            target: aarch64-apple-darwin
+            rust_targets: aarch64-apple-darwin
           - platform: linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
