@@ -14,6 +14,29 @@ pub struct CascadePass<'a> {
     pub constraints: TileConstraints,
     /// Native scale of the resolved variant, i.e. the ratio this pass applies.
     pub native_scale: u32,
+    /// Validated per-job tile size override. When `None`, the pass derives a
+    /// size from the manifest's recommendation. The single-pass path always
+    /// honours this override, so the cascade must too or the same
+    /// `UpscaleJobRequest` means different things depending on the scale.
+    pub tile_size_override: Option<u32>,
+    /// Validated per-job overlap override, same contract as above.
+    pub tile_overlap_override: Option<u32>,
+}
+
+impl CascadePass<'_> {
+    /// The tile size this pass uses, honouring the per-job override.
+    fn effective_tile_size(&self) -> u32 {
+        match self.tile_size_override {
+            Some(size) => size,
+            None => default_tile_size(self.constraints),
+        }
+    }
+
+    /// The overlap this pass uses, honouring the per-job override.
+    fn effective_overlap(&self) -> u32 {
+        self.tile_overlap_override
+            .unwrap_or(self.constraints.overlap)
+    }
 }
 
 /// Progress reporting for a multi-pass job.
@@ -110,12 +133,21 @@ impl CascadePipeline {
         let mut pass_tiles: Vec<usize> = Vec::with_capacity(passes.len());
         let mut dimensions = (src_w, src_h);
         for pass in passes {
-            let tile_size = default_tile_size(pass.constraints);
+            // Re-validate against this pass's own constraints. The orchestrator
+            // validated the override against the job's model at submit time, but
+            // each pass may carry different constraints; a mismatch is a
+            // structured error, not a silent fallback.
+            validate_tile_params(
+                pass.effective_tile_size(),
+                pass.effective_overlap(),
+                pass.constraints,
+                pass_tiles.len(),
+            )?;
             let plan = TilePlan::build(
                 dimensions.0,
                 dimensions.1,
-                tile_size,
-                pass.constraints.overlap,
+                pass.effective_tile_size(),
+                pass.effective_overlap(),
             );
             pass_tiles.push(plan.tiles.len());
             dimensions = (
@@ -137,8 +169,8 @@ impl CascadePipeline {
             cancel.check()?;
 
             let (in_w, in_h) = current.dimensions();
-            let tile_size = default_tile_size(pass.constraints);
-            let overlap = pass.constraints.overlap;
+            let tile_size = pass.effective_tile_size();
+            let overlap = pass.effective_overlap();
             validate_tile_params(tile_size, overlap, pass.constraints, index)?;
 
             let plan = TilePlan::build(in_w, in_h, tile_size, overlap);

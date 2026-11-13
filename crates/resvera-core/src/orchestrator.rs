@@ -676,6 +676,8 @@ impl JobOrchestrator {
         if pass_count > 1 {
             // Multi-pass cascade: the same model is repeated, and the cascade
             // downsamples the overshoot (4x + 4x = 16x) to the requested scale.
+            // The per-job tile overrides are already validated above against the
+            // job's model constraints; the pipeline re-validates them per pass.
             let cascade = CascadePipeline::new(Arc::clone(&self.engine));
             let adapter_ref: &dyn ModelAdapter = adapter.as_ref();
             let passes: Vec<CascadePass<'_>> = (0..pass_count)
@@ -684,6 +686,8 @@ impl JobOrchestrator {
                     weights: &model_bytes,
                     constraints,
                     native_scale,
+                    tile_size_override: Some(tile_size),
+                    tile_overlap_override: Some(tile_overlap),
                 })
                 .collect();
 
