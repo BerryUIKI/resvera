@@ -69,12 +69,16 @@ fn test_8x_cascade_upscale_pipeline() {
             weights: b"verified-4x-model",
             constraints,
             native_scale: 4,
+            tile_size_override: None,
+            tile_overlap_override: None,
         },
         CascadePass {
             adapter: &adapter,
             weights: b"verified-4x-model",
             constraints,
             native_scale: 4,
+            tile_size_override: None,
+            tile_overlap_override: None,
         },
     ];
 
@@ -114,12 +118,16 @@ fn test_cascade_total_scale_and_dimensions() {
             weights: b"w",
             constraints,
             native_scale: 4,
+            tile_size_override: None,
+            tile_overlap_override: None,
         },
         CascadePass {
             adapter: &adapter,
             weights: b"w",
             constraints,
             native_scale: 4,
+            tile_size_override: None,
+            tile_overlap_override: None,
         },
     ];
     assert_eq!(CascadePipeline::total_scale(&passes), 16);
@@ -143,12 +151,16 @@ fn test_cascade_rejects_oversized_working_buffer() {
             weights: b"w",
             constraints,
             native_scale: 4,
+            tile_size_override: None,
+            tile_overlap_override: None,
         },
         CascadePass {
             adapter: &adapter,
             weights: b"w",
             constraints,
             native_scale: 4,
+            tile_size_override: None,
+            tile_overlap_override: None,
         },
     ];
 
@@ -218,6 +230,8 @@ fn test_cascade_uses_model_tile_constraints_not_hardcoded_values() {
         weights: b"verified-4x-model",
         constraints,
         native_scale: 4,
+        tile_size_override: None,
+        tile_overlap_override: None,
     }];
 
     let out = cascade
@@ -254,6 +268,8 @@ fn test_cascade_rejects_overlap_larger_than_tile() {
         weights: b"w",
         constraints,
         native_scale: 4,
+        tile_size_override: None,
+        tile_overlap_override: None,
     }];
 
     let err = cascade
@@ -269,5 +285,187 @@ fn test_cascade_rejects_overlap_larger_than_tile() {
     assert!(
         err.to_string().contains("overlap"),
         "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn test_cascade_honours_tile_size_override() {
+    // #96: the cascade used manifest-recommended tiles and ignored the per-job
+    // override that the single-pass path honours. This records what tile sizes
+    // the engine is actually asked to run, then asserts the override was used
+    // in both passes rather than the manifest default.
+    use resvera_core::engine::{
+        EngineCapabilities, EngineError, EngineHealth, EngineId, InferenceEngine, ModelSession,
+        OwnedTensor, TensorView,
+    };
+    use resvera_core::pipeline::cascade::{CascadePass, CascadePipeline};
+    use resvera_core::pipeline::tiling::BlendMode;
+    use std::sync::Mutex;
+
+    struct RecordingEngine {
+        seen: Mutex<Vec<[usize; 4]>>,
+    }
+
+    struct RecordingSession;
+
+    impl ModelSession for RecordingSession {
+        fn input_shape(&self) -> Option<[usize; 4]> {
+            None
+        }
+        fn output_shape(&self) -> Option<[usize; 4]> {
+            None
+        }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
+        }
+    }
+
+    impl InferenceEngine for RecordingEngine {
+        fn id(&self) -> EngineId {
+            EngineId("recording".into())
+        }
+        fn capabilities(&self) -> EngineCapabilities {
+            EngineCapabilities {
+                engine_id: self.id(),
+                engine_version: "test".into(),
+                supported_providers: vec!["cpu".into()],
+                supports_fp16: false,
+                supports_dynamic_shapes: true,
+            }
+        }
+        fn probe(&self) -> Result<EngineHealth, EngineError> {
+            Ok(EngineHealth {
+                healthy: true,
+                active_provider: "cpu".into(),
+                diagnostic_message: None,
+            })
+        }
+        fn load(
+            &self,
+            model_bytes: &[u8],
+            _provider: Option<&str>,
+        ) -> Result<Box<dyn ModelSession>, EngineError> {
+            assert!(!model_bytes.is_empty());
+            Ok(Box::new(RecordingSession))
+        }
+        fn run(
+            &self,
+            _session: &mut dyn ModelSession,
+            input: TensorView<'_>,
+            _cancel: &CancellationToken,
+        ) -> Result<OwnedTensor, EngineError> {
+            // Record the input tile shape so the tile sizes used are directly
+            // observable rather than inferred from the output.
+            self.seen.lock().unwrap().push(input.shape);
+            let [b, c, h, w] = input.shape;
+            let out = OwnedTensor::new([b, c, h * 4, w * 4], vec![0.0; b * c * h * 4 * w * 4])?;
+            Ok(out)
+        }
+    }
+
+    let engine = Arc::new(RecordingEngine {
+        seen: Mutex::new(Vec::new()),
+    });
+    let cascade = CascadePipeline::new(Arc::clone(&engine) as Arc<dyn InferenceEngine>);
+
+    let mut img = RgbImage::new(64, 64);
+    for y in 0..64 {
+        for x in 0..64 {
+            img.put_pixel(x, y, Rgb([64, 96, 128]));
+        }
+    }
+
+    let adapter = RrdbAdapter;
+    let constraints = TileConstraints {
+        alignment: 1,
+        minimum: 32,
+        // Recommended 256 would produce 64px tiles on this input only via
+        // clamping; the override of 32 produces a distinct, checkable layout.
+        recommended: 256,
+        overlap: 8,
+        window_size: None,
+        static_shapes_required: false,
+    };
+    let passes = [
+        CascadePass {
+            adapter: &adapter,
+            weights: b"w",
+            constraints,
+            native_scale: 4,
+            tile_size_override: Some(32),
+            tile_overlap_override: Some(8),
+        },
+        CascadePass {
+            adapter: &adapter,
+            weights: b"w",
+            constraints,
+            native_scale: 4,
+            tile_size_override: Some(32),
+            tile_overlap_override: Some(8),
+        },
+    ];
+
+    cascade
+        .run(
+            &img,
+            &passes,
+            8,
+            BlendMode::Cosine,
+            &CancellationToken::new(),
+            &mut NoProgress,
+        )
+        .unwrap();
+
+    let seen = engine.seen.lock().unwrap();
+    assert!(!seen.is_empty(), "cascade must run inference");
+    for shape in seen.iter() {
+        // Every tile the engine received must fit in the overridden 32x32
+        // tile. With the manifest default (256) a single full-image tile of
+        // 64x64 would appear instead — that is the #96 failure mode.
+        assert!(
+            shape[2] <= 32 && shape[3] <= 32,
+            "engine received a {shape:?} tile, but the override was 32"
+        );
+    }
+}
+
+#[test]
+fn test_cascade_rejects_override_below_model_minimum() {
+    // An override must be validated against the pass's own constraints, not
+    // silently adjusted. 16 is below this manifest's minimum of 32.
+    let engine = Arc::new(MockEngine);
+    let cascade = CascadePipeline::new(engine);
+    let img = RgbImage::new(64, 64);
+    let adapter = RrdbAdapter;
+    let constraints = TileConstraints {
+        alignment: 1,
+        minimum: 32,
+        recommended: 256,
+        overlap: 8,
+        window_size: None,
+        static_shapes_required: false,
+    };
+    let passes = [CascadePass {
+        adapter: &adapter,
+        weights: b"w",
+        constraints,
+        native_scale: 4,
+        tile_size_override: Some(16),
+        tile_overlap_override: Some(8),
+    }];
+
+    let err = cascade
+        .run(
+            &img,
+            &passes,
+            4,
+            BlendMode::Cosine,
+            &CancellationToken::new(),
+            &mut NoProgress,
+        )
+        .expect_err("below-minimum override must be rejected");
+    assert!(
+        err.to_string().contains("minimum"),
+        "expected a minimum violation, got: {err}"
     );
 }
