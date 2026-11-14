@@ -95,6 +95,7 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
         run: |
+          set -euo pipefail
           KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
           security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
@@ -102,6 +103,18 @@ jobs:
           echo "$APPLE_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
           security import $RUNNER_TEMP/certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$APPLE_KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          # Without this, the freshly-created keychain is not in codesign's
+          # search list and the identity imported above is invisible to it.
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "$(security list-keychains -d user | tr -d '\"' | tr '\n' ' ')"
+          # Tauri needs the identity name to sign. Extract it from the keychain
+          # rather than hardcoding, so any valid Developer ID certificate works.
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -oE '"[^"]+"' | head -1 | tr -d '"')
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No codesigning identity found in the imported certificate."
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "Signing identity: $IDENTITY"
 
       - name: Build Tauri Desktop Application & Bundles
         env:
